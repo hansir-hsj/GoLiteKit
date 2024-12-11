@@ -1,4 +1,4 @@
-package datong
+package golite
 
 import (
 	"net"
@@ -6,16 +6,19 @@ import (
 )
 
 type Server struct {
-	context    Context
 	addr       string
 	httpServer http.Server
-	handler    http.HandlerFunc
+	router     Router
 }
 
 func New(addr string) *Server {
+	router := NewRouter()
 	return &Server{
-		addr:       addr,
-		httpServer: http.Server{},
+		addr: addr,
+		httpServer: http.Server{
+			Handler: &router,
+		},
+		router: router,
 	}
 }
 
@@ -24,12 +27,8 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	s.httpServer.Handler = http.HandlerFunc(Handle)
+	s.httpServer.Handler = &s.router
 
 	s.httpServer.Serve(l)
 	return nil
-}
-
-func Handle(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("hello world!"))
 }
