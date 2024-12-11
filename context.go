@@ -5,20 +5,16 @@ import (
 	"net/http"
 )
 
-const sharedContextKey = "sharedContextKey"
-
-type sharedContext struct {
-	request  http.Request
-	response http.ResponseWriter
-}
-
 type Context struct {
-	sharedContext
+	ctx            context.Context
+	request        *http.Request
+	responseWriter http.ResponseWriter
 }
 
-func GetContext(ctx context.Context) Context {
-	if context, ok := ctx.Value(sharedContextKey).(Context); ok {
-		return context
+func NewContext(r *http.Request, w http.ResponseWriter) *Context {
+	return &Context{
+		ctx:            r.Context(),
+		request:        r,
+		responseWriter: w,
 	}
-	return Context{}
 }
