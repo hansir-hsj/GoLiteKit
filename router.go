@@ -23,12 +23,16 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	WithContext(ctx)
+	ctx = WithContext(ctx)
+	gcx := GetContext(ctx)
+	gcx.SetRequest(req)
+	gcx.SetResponseWriter(w)
 
 	path := req.URL.Path
 	controller, ok := r.routers[path]
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
+		return
 	}
 	controller.Serve(ctx)
 }
