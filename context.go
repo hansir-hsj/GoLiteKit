@@ -17,18 +17,34 @@ type Context struct {
 }
 
 func GetContext(ctx context.Context) *Context {
-	gbc := ctx.Value(globalContextKey)
-	if c, ok := gbc.(*Context); ok {
+	gcx := ctx.Value(globalContextKey)
+	if c, ok := gcx.(*Context); ok {
 		return c
 	}
 	return nil
 }
 
 func WithContext(ctx context.Context) context.Context {
-	gbc := GetContext(ctx)
-	if gbc == nil {
-		gbc = &Context{}
-		return context.WithValue(ctx, globalContextKey, gbc)
+	gcx := GetContext(ctx)
+	if gcx == nil {
+		gcx = &Context{}
+		return context.WithValue(ctx, globalContextKey, gcx)
 	}
 	return ctx
+}
+
+func (ctx *Context) SetRequest(r *http.Request) {
+	ctx.request = r
+}
+
+func (ctx *Context) Request() *http.Request {
+	return ctx.request
+}
+
+func (ctx *Context) SetResponseWriter(w http.ResponseWriter) {
+	ctx.responseWriter = w
+}
+
+func (ctx *Context) ResponseWriter() http.ResponseWriter {
+	return ctx.responseWriter
 }

@@ -32,3 +32,7 @@ func (s *Server) Start() error {
 	s.httpServer.Serve(l)
 	return nil
 }
+
+func (s *Server) Register(path string, controller Controller) {
+	s.router.Register(path, controller)
+}
