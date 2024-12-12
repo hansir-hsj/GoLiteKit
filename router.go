@@ -25,8 +25,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	ctx = WithContext(ctx)
 	gcx := GetContext(ctx)
-	gcx.SetRequest(req)
-	gcx.SetResponseWriter(w)
+	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
 	path := req.URL.Path
 	controller, ok := r.routers[path]
