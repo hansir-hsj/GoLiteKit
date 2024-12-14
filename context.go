@@ -2,6 +2,7 @@ package golite
 
 import (
 	"context"
+	"log"
 	"net/http"
 )
 
@@ -60,4 +61,30 @@ func (ctx *Context) Request() *http.Request {
 
 func (ctx *Context) ResponseWriter() http.ResponseWriter {
 	return ctx.responseWriter
+}
+
+func (ctx *Context) ServeRawData(data any) {
+	header := ctx.responseWriter.Header()
+	switch body := data.(type) {
+	case []byte:
+		if header.Get("Content-Type") == "" {
+			header.Set("Content-Type", "application/octet-stream")
+		}
+		ctx.responseWriter.Write(body)
+	case string:
+		if header.Get("Content-Type") == "" {
+			header.Set("Content-Type", "text/plain; charset=UTF-8")
+		}
+		ctx.responseWriter.Write([]byte(body))
+	default:
+		log.Printf("unsported response data type： %T", data)
+	}
+}
+
+func (ctx *Context) ServeJSON(data any) {
+	header := ctx.responseWriter.Header()
+	if header.Get("Content-Type") == "" {
+		header.Set("Content-Type", "application/json")
+	}
+	ctx.ServeRawData(data)
 }
