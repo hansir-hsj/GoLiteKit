@@ -2,6 +2,7 @@ package golite
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 )
@@ -20,8 +21,6 @@ func (r *Router) Register(path string, controller Controller) {
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
 
 	ctx = WithContext(ctx)
 	gcx := GetContext(ctx)
@@ -33,5 +32,27 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
-	controller.Serve(ctx)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	doneChan := make(chan struct{}, 1)
+	panicChan := make(chan any, 1)
+
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				panicChan <- p
+			}
+		}()
+		controller.Serve(ctx)
+		doneChan <- struct{}{}
+	}()
+
+	select {
+	case p := <-panicChan:
+		log.Printf("%v", p)
+	case <-ctx.Done():
+		log.Print("timeout")
+	case <-doneChan:
+	}
 }
