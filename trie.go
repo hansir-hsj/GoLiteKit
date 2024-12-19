@@ -18,14 +18,13 @@ type Node struct {
 
 func NewTrie() *Trie {
 	return &Trie{
-		root: newNode(false),
+		root: newNode(),
 	}
 }
 
-func newNode(hasWildChild bool) *Node {
+func newNode() *Node {
 	return &Node{
-		children:     make(map[string]*Node),
-		hasWildChild: hasWildChild,
+		children: make(map[string]*Node),
 	}
 }
 
@@ -42,15 +41,16 @@ func (t *Trie) Add(path string, controller Controller) {
 				node = node.children[WildKey]
 				continue
 			}
-			child := newNode(true)
+			child := newNode()
 			node.children[WildKey] = child
+			node.hasWildChild = true
 			node = child
 		} else {
 			if child, ok := node.children[w]; ok {
 				node = child
 				continue
 			}
-			child := newNode(false)
+			child := newNode()
 			node.children[w] = child
 			node = child
 		}
@@ -64,6 +64,9 @@ func (t *Trie) Get(path string) Controller {
 	for i, w := range words {
 		isLast := i == len(words)-1
 		if isWildWord(w) {
+			if !node.hasWildChild {
+				return nil
+			}
 			node = node.children[WildKey]
 		} else {
 			node = node.children[w]
