@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-type TestController struct{}
+type TestController struct {
+	value string
+}
 
 func (tc TestController) Serve(ctx context.Context) error {
 	return nil
@@ -19,7 +21,9 @@ func TestTrie(t *testing.T) {
 		{"/home", TestController{}},
 		{"/about", TestController{}},
 		{"/user/:id", TestController{}},
-		{"/user/:age/name", TestController{}},
+		{"/user/:id/aaa", TestController{"aaa"}},
+		{"/user/:id/bbb", TestController{"bbb"}},
+		{"/user/:age/name", TestController{"name"}},
 	}
 
 	trie := NewTrie()
@@ -32,6 +36,9 @@ func TestTrie(t *testing.T) {
 		controller, _ := trie.Get(c.path)
 		if controller == nil {
 			t.Errorf("controller not found for path %s", c.path)
+		}
+		if controller != c.controller {
+			t.Errorf("wrong controller found for path %s", c.path)
 		}
 	}
 }
