@@ -58,6 +58,9 @@ func (t *Trie) Add(path string, controller Controller) {
 			node = child
 		}
 	}
+	if node.controller != nil {
+		panic("duplicate path: " + path)
+	}
 	node.controller = controller
 }
 
