@@ -50,6 +50,22 @@ func TestWildPath(t *testing.T) {
 		t.Errorf("controller not found for path %s", "/user/:id")
 	}
 	if c, ok := trie.Get("/user/:name"); !ok || c == nil {
-		t.Errorf("controller not found for path %s", "/user/:id")
+		t.Errorf("controller not found for path %s", "/user/:name")
 	}
+}
+
+func TestDuplicatePath(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			if r != "duplicate path: /user/:name" {
+				t.Errorf("Expected panic value 'duplicate path: /user/:name', but got %v", r)
+			}
+			t.Logf("Recovered: %v", r)
+		}
+	}()
+
+	trie := NewTrie()
+	trie.Add("/user/:id", TestController{"id"})
+	trie.Add("/user/:name", TestController{"name"})
+	t.Errorf("Expected panic, but test completed without panic")
 }
