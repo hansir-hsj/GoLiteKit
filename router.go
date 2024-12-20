@@ -9,31 +9,59 @@ import (
 )
 
 type Router struct {
-	routers     map[string]Controller
-	wildRouters *Trie
+	// method -> path -> controller
+	routers     map[string]map[string]Controller
+	wildRouters map[string]*Trie
 }
 
 func NewRouter() Router {
 	return Router{
-		routers:     make(map[string]Controller),
-		wildRouters: NewTrie(),
+		routers:     make(map[string]map[string]Controller, 4),
+		wildRouters: make(map[string]*Trie, 4),
 	}
 }
 
-func (r *Router) Register(path string, controller Controller) {
-	if strings.Contains(path, ":") {
-		r.wildRouters.Add(path, controller)
-		return
-	}
-	r.routers[path] = controller
+func (r *Router) OnPost(path string, controller Controller) {
+	r.register(http.MethodPost, path, controller)
 }
 
-func (r *Router) Route(path string) (Controller, bool) {
+func (r *Router) OnGet(path string, controller Controller) {
+	r.register(http.MethodGet, path, controller)
+}
+
+func (r *Router) OnPut(path string, controller Controller) {
+	r.register(http.MethodPut, path, controller)
+}
+
+func (r *Router) OnDelete(path string, controller Controller) {
+	r.register(http.MethodDelete, path, controller)
+}
+
+func (r *Router) register(method, path string, controller Controller) {
 	if strings.Contains(path, ":") {
-		return r.wildRouters.Get(path)
+		if _, ok := r.wildRouters[method]; !ok {
+			r.wildRouters[method] = NewTrie()
+		}
+		r.wildRouters[method].Add(path, controller)
+	} else {
+		if _, ok := r.routers[method]; !ok {
+			r.routers[method] = make(map[string]Controller)
+		}
+		r.routers[method][path] = controller
 	}
-	if controller, ok := r.routers[path]; ok {
-		return controller, true
+}
+
+func (r *Router) Route(method, path string) (Controller, bool) {
+	if strings.Contains(path, ":") {
+		if trie, ok := r.wildRouters[method]; ok {
+			return trie.Get(path)
+		}
+		return nil, false
+	}
+	if router, ok := r.routers[method]; ok {
+		if controller, ok := router[path]; ok {
+			return controller, true
+		}
 	}
 	return nil, false
 }
@@ -45,7 +73,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
-	controller, ok := r.Route(req.URL.Path)
+	controller, ok := r.Route(req.Method, req.URL.Path)
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
