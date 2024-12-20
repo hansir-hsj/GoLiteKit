@@ -29,7 +29,7 @@ func TestTrie(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		controller := trie.Get(c.path)
+		controller, _ := trie.Get(c.path)
 		if controller == nil {
 			t.Errorf("controller not found for path %s", c.path)
 		}
