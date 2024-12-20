@@ -4,19 +4,38 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
 type Router struct {
-	routers map[string]Controller
+	routers     map[string]Controller
+	wildRouters *Trie
 }
 
 func NewRouter() Router {
-	return Router{routers: make(map[string]Controller)}
+	return Router{
+		routers:     make(map[string]Controller),
+		wildRouters: NewTrie(),
+	}
 }
 
 func (r *Router) Register(path string, controller Controller) {
+	if strings.Contains(path, ":") {
+		r.wildRouters.Add(path, controller)
+		return
+	}
 	r.routers[path] = controller
+}
+
+func (r *Router) Route(path string) (Controller, bool) {
+	if strings.Contains(path, ":") {
+		return r.wildRouters.Get(path)
+	}
+	if controller, ok := r.routers[path]; ok {
+		return controller, true
+	}
+	return nil, false
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -26,8 +45,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
-	path := req.URL.Path
-	controller, ok := r.routers[path]
+	controller, ok := r.Route(req.URL.Path)
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return

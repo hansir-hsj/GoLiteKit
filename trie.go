@@ -36,6 +36,9 @@ func (t *Trie) Add(path string, controller Controller) {
 	words := strings.Split(path, "/")
 	node := t.root
 	for _, w := range words {
+		if w == "" {
+			continue
+		}
 		if isWildWord(w) {
 			if node.hasWildChild {
 				node = node.children[WildKey]
@@ -58,25 +61,28 @@ func (t *Trie) Add(path string, controller Controller) {
 	node.controller = controller
 }
 
-func (t *Trie) Get(path string) Controller {
+func (t *Trie) Get(path string) (Controller, bool) {
 	words := strings.Split(path, "/")
 	node := t.root
 	for i, w := range words {
+		if w == "" {
+			continue
+		}
 		isLast := i == len(words)-1
 		if isWildWord(w) {
 			if !node.hasWildChild {
-				return nil
+				return nil, false
 			}
 			node = node.children[WildKey]
 		} else {
 			node = node.children[w]
 		}
 		if node == nil {
-			return nil
+			return nil, false
 		}
 		if isLast && node.controller != nil {
-			return node.controller
+			return node.controller, true
 		}
 	}
-	return nil
+	return nil, false
 }
