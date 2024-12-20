@@ -13,7 +13,7 @@ func (tc TestController) Serve(ctx context.Context) error {
 	return nil
 }
 
-func TestTrie(t *testing.T) {
+func TestAddGet(t *testing.T) {
 	cases := []struct {
 		path       string
 		controller Controller
@@ -40,5 +40,16 @@ func TestTrie(t *testing.T) {
 		if controller != c.controller {
 			t.Errorf("wrong controller found for path %s", c.path)
 		}
+	}
+}
+
+func TestWildPath(t *testing.T) {
+	trie := NewTrie()
+	trie.Add("/user/:id", TestController{})
+	if c, ok := trie.Get("/user/:id"); !ok || c == nil {
+		t.Errorf("controller not found for path %s", "/user/:id")
+	}
+	if c, ok := trie.Get("/user/:name"); !ok || c == nil {
+		t.Errorf("controller not found for path %s", "/user/:id")
 	}
 }
