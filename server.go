@@ -31,3 +31,19 @@ func (s *Server) Start() error {
 	s.httpServer.Serve(l)
 	return nil
 }
+
+func (s *Server) OnGet(path string, controller Controller) {
+	s.router.OnGet(path, controller)
+}
+
+func (s *Server) OnPost(path string, controller Controller) {
+	s.router.OnPost(path, controller)
+}
+
+func (s *Server) OnPut(path string, controller Controller) {
+	s.router.OnPut(path, controller)
+}
+
+func (s *Server) OnDelete(path string, controller Controller) {
+	s.router.OnDelete(path, controller)
+}
