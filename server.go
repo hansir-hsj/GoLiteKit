@@ -27,7 +27,6 @@ func (s *Server) Start() error {
 	if err != nil {
 		return err
 	}
-	s.httpServer.Handler = &s.router
 	s.httpServer.Serve(l)
 	return nil
 }
