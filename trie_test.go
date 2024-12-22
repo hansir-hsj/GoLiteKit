@@ -1,16 +1,13 @@
 package golite
 
 import (
-	"context"
 	"testing"
 )
 
 type TestController struct {
-	value string
-}
+	BaseController
 
-func (tc TestController) Serve(ctx context.Context) error {
-	return nil
+	value string
 }
 
 func TestAddGet(t *testing.T) {
@@ -18,12 +15,12 @@ func TestAddGet(t *testing.T) {
 		path       string
 		controller Controller
 	}{
-		{"/home", TestController{}},
-		{"/about", TestController{}},
-		{"/user/:id", TestController{}},
-		{"/user/:id/aaa", TestController{"aaa"}},
-		{"/user/:id/bbb", TestController{"bbb"}},
-		{"/user/:age/name", TestController{"name"}},
+		{"/home", &TestController{}},
+		{"/about", &TestController{}},
+		{"/user/:id", &TestController{}},
+		{"/user/:id/aaa", &TestController{value: "aaa"}},
+		{"/user/:id/bbb", &TestController{value: "bbb"}},
+		{"/user/:age/name", &TestController{value: "name"}},
 	}
 
 	trie := NewTrie()
@@ -45,7 +42,7 @@ func TestAddGet(t *testing.T) {
 
 func TestWildPath(t *testing.T) {
 	trie := NewTrie()
-	trie.Add("/user/:id", TestController{})
+	trie.Add("/user/:id", &TestController{})
 	if c, ok := trie.Get("/user/:id"); !ok || c == nil {
 		t.Errorf("controller not found for path %s", "/user/:id")
 	}
@@ -65,7 +62,7 @@ func TestDuplicatePath(t *testing.T) {
 	}()
 
 	trie := NewTrie()
-	trie.Add("/user/:id", TestController{"id"})
-	trie.Add("/user/:name", TestController{"name"})
+	trie.Add("/user/:id", &TestController{value: "id"})
+	trie.Add("/user/:name", &TestController{value: "name"})
 	t.Errorf("Expected panic, but test completed without panic")
 }

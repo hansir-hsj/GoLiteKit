@@ -90,7 +90,14 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				panicChan <- p
 			}
 		}()
-		controller.Serve(ctx)
+		err := controller.Init(ctx)
+		if err != nil {
+			return
+		}
+		err = controller.Serve(ctx)
+		if err != nil {
+			return
+		}
 		doneChan <- struct{}{}
 	}()
 
