@@ -205,3 +205,59 @@ func (c *BaseController) FormBool(key string, def bool) bool {
 	}
 	return def
 }
+
+func (c *BaseController) RouterParamString(key string, def string) string {
+	params := c.gcx.routerParams
+	if val, ok := params[key]; ok && val != "" {
+		return val
+	}
+	return def
+}
+
+func (c *BaseController) RouterParamInt(key string, def int) int {
+	params := c.gcx.routerParams
+	if val, ok := params[key]; ok && val != "" {
+		if ival, err := strconv.Atoi(val); err == nil {
+			return ival
+		}
+	}
+	return def
+}
+
+func (c *BaseController) RouterParamInt64(key string, def int64) int64 {
+	params := c.gcx.routerParams
+	if val, ok := params[key]; ok && val != "" {
+		if ival, err := strconv.ParseInt(val, 10, 64); err == nil {
+			return ival
+		}
+	}
+	return def
+}
+
+func (c *BaseController) RouterParamFloat32(key string, def float32) float32 {
+	params := c.gcx.routerParams
+	if val, ok := params[key]; ok && val != "" {
+		if fval, err := strconv.ParseFloat(val, 32); err == nil {
+			return float32(fval)
+		}
+	}
+	return def
+}
+
+func (c *BaseController) RouterParamFloat64(key string, def float64) float64 {
+	params := c.gcx.routerParams
+	if val, ok := params[key]; ok && val != "" {
+		if fval, err := strconv.ParseFloat(val, 64); err == nil {
+			return fval
+		}
+	}
+	return def
+}
+
+func (c *BaseController) RouterParamBool(key string, def bool) bool {
+	params := c.gcx.routerParams
+	if val, ok := params[key]; ok && val != "" {
+		return val == "1" || strings.ToLower(val) == "true"
+	}
+	return def
+}

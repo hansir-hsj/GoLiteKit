@@ -17,6 +17,7 @@ type ContextOption func(*Context)
 type Context struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
+	routerParams   map[string]string
 }
 
 func GetContext(ctx context.Context) *Context {
@@ -55,12 +56,22 @@ func WithResponseWriter(w http.ResponseWriter) ContextOption {
 	}
 }
 
+func WithRouterParams(params map[string]string) ContextOption {
+	return func(gcx *Context) {
+		gcx.routerParams = params
+	}
+}
+
 func (ctx *Context) Request() *http.Request {
 	return ctx.request
 }
 
 func (ctx *Context) ResponseWriter() http.ResponseWriter {
 	return ctx.responseWriter
+}
+
+func (ctx *Context) RouterParams() map[string]string {
+	return ctx.routerParams
 }
 
 func (ctx *Context) ServeRawData(data any) {

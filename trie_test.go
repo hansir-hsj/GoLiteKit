@@ -20,7 +20,6 @@ func TestAddGet(t *testing.T) {
 		{"/user/:id", &TestController{}},
 		{"/user/:id/aaa", &TestController{value: "aaa"}},
 		{"/user/:id/bbb", &TestController{value: "bbb"}},
-		{"/user/:age/name", &TestController{value: "name"}},
 	}
 
 	trie := NewTrie()
@@ -30,7 +29,7 @@ func TestAddGet(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		controller, _ := trie.Get(c.path)
+		controller, _, _ := trie.Get(c.path)
 		if controller == nil {
 			t.Errorf("controller not found for path %s", c.path)
 		}
@@ -43,10 +42,10 @@ func TestAddGet(t *testing.T) {
 func TestWildPath(t *testing.T) {
 	trie := NewTrie()
 	trie.Add("/user/:id", &TestController{})
-	if c, ok := trie.Get("/user/:id"); !ok || c == nil {
+	if c, _, ok := trie.Get("/user/:id"); !ok || c == nil {
 		t.Errorf("controller not found for path %s", "/user/:id")
 	}
-	if c, ok := trie.Get("/user/:name"); !ok || c == nil {
+	if c, _, ok := trie.Get("/user/:name"); !ok || c == nil {
 		t.Errorf("controller not found for path %s", "/user/:name")
 	}
 }
@@ -65,4 +64,16 @@ func TestDuplicatePath(t *testing.T) {
 	trie.Add("/user/:id", &TestController{value: "id"})
 	trie.Add("/user/:name", &TestController{value: "name"})
 	t.Errorf("Expected panic, but test completed without panic")
+}
+
+func TestWildParams(t *testing.T) {
+	trie := NewTrie()
+	trie.Add("/user/:id/name", &TestController{})
+	c, params, _ := trie.Get("/user/xiaoming/name")
+	if c == nil {
+		t.Errorf("controller not found for path %s", "/user/xiaoming/name")
+	}
+	if params["id"] != "xiaoming" {
+		t.Errorf("wrong params found for path %s", "/user/xiaoming/name")
+	}
 }
