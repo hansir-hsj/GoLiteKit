@@ -51,19 +51,18 @@ func (r *Router) register(method, path string, controller Controller) {
 	}
 }
 
-func (r *Router) Route(method, path string) (Controller, bool) {
-	if strings.Contains(path, ":") {
-		if trie, ok := r.wildRouters[method]; ok {
-			return trie.Get(path)
-		}
-		return nil, false
-	}
+func (r *Router) Route(method, path string) (Controller, map[string]string, bool) {
+	// 先匹配普通路由
 	if router, ok := r.routers[method]; ok {
 		if controller, ok := router[path]; ok {
-			return controller, true
+			return controller, nil, true
 		}
 	}
-	return nil, false
+	// 再匹配带参数的路由
+	if trie, ok := r.wildRouters[method]; ok {
+		return trie.Get(path)
+	}
+	return nil, nil, false
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -73,11 +72,15 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
-	controller, ok := r.Route(req.Method, req.URL.Path)
+	controller, params, ok := r.Route(req.Method, req.URL.Path)
 	if !ok {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
+	if params != nil {
+		gcx.SetContextOptions(WithRouterParams(params))
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 

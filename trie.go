@@ -14,6 +14,7 @@ type Node struct {
 	children     map[string]*Node
 	controller   Controller
 	hasWildChild bool
+	word         string
 }
 
 func NewTrie() *Trie {
@@ -29,12 +30,16 @@ func newNode() *Node {
 }
 
 func isWildWord(word string) bool {
-	return word == WildKey || strings.HasPrefix(word, ":")
+	return strings.HasPrefix(word, ":")
 }
 
+// These paths are identical, duplicate paths are not allowed
+// /user/:id/name
+// /user/:status/name
 func (t *Trie) Add(path string, controller Controller) {
 	words := strings.Split(path, "/")
 	node := t.root
+
 	for _, w := range words {
 		if w == "" {
 			continue
@@ -42,9 +47,13 @@ func (t *Trie) Add(path string, controller Controller) {
 		if isWildWord(w) {
 			if node.hasWildChild {
 				node = node.children[WildKey]
+				if node.word != w[1:] {
+					panic("duplicate path: " + path)
+				}
 				continue
 			}
 			child := newNode()
+			child.word = w[1:]
 			node.children[WildKey] = child
 			node.hasWildChild = true
 			node = child
@@ -64,28 +73,34 @@ func (t *Trie) Add(path string, controller Controller) {
 	node.controller = controller
 }
 
-func (t *Trie) Get(path string) (Controller, bool) {
+// Add path /user/:id/name
+// Get path /user/123456/name
+// params: id = 123456
+func (t *Trie) Get(path string) (Controller, map[string]string, bool) {
 	words := strings.Split(path, "/")
 	node := t.root
+	params := make(map[string]string)
+
 	for i, w := range words {
 		if w == "" {
 			continue
 		}
 		isLast := i == len(words)-1
-		if isWildWord(w) {
-			if !node.hasWildChild {
-				return nil, false
-			}
-			node = node.children[WildKey]
-		} else {
-			node = node.children[w]
+		var child *Node
+		child, ok := node.children[w]
+		if !ok && node.hasWildChild {
+			child = node.children[WildKey]
+			params[child.word] = w
 		}
-		if node == nil {
-			return nil, false
+
+		if child != nil {
+			node = child
 		}
+
 		if isLast && node.controller != nil {
-			return node.controller, true
+			return node.controller, params, true
 		}
 	}
-	return nil, false
+
+	return nil, nil, false
 }
