@@ -1,0 +1,14 @@
+{
+    "name": "John Doe",
+    "age": 30,
+    "is_student": false,
+    "scores": [88, 92, 77, 85],
+    "address": {
+      "street": "123 Main St",
+      "city": "Anytown",
+      "state": "CA",
+      "zip_code": "12345"
+    },
+    "hobbies": ["reading", "hiking", "coding"],
+    "empty_field": null
+}
