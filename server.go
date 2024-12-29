@@ -1,6 +1,7 @@
 package golite
 
 import (
+	"github/hsj/golite/env"
 	"net"
 	"net/http"
 )
@@ -11,10 +12,15 @@ type Server struct {
 	router     Router
 }
 
-func New(addr string) *Server {
+func New(conf string) *Server {
 	router := NewRouter()
+
+	if err := env.Init(conf); err != nil {
+		return nil
+	}
+
 	return &Server{
-		addr: addr,
+		addr: env.GetAddr(),
 		httpServer: http.Server{
 			Handler: &router,
 		},
