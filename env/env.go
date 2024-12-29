@@ -1,38 +1,53 @@
 package env
 
-import "github/hsj/golite/config"
+import (
+	"github/hsj/golite/config"
+	"os"
+)
 
-var Default = &Env{}
+var defaultEnv = &Env{}
 
 type Env struct {
-	AppName string
-	RunMode string
+	AppName string `toml:"appName"`
+	RunMode string `toml:"runMode"`
+	Addr    string `toml:"addr"`
 	RootDir string
 	ConfDir string
 	LogDir  string
 }
 
-func (e *Env) Init(path string) error {
+func Init(path string) error {
 	cnf := config.NewAppConfig()
-	return cnf.Parse(path, Default)
+	curPath, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	defaultEnv.RootDir = curPath
+	defaultEnv.ConfDir = curPath + "/conf"
+	defaultEnv.LogDir = curPath + "/log"
+	return cnf.Parse(path, defaultEnv)
 }
 
-func (e *Env) GetAppName() string {
-	return Default.AppName
+func GetAppName() string {
+	return defaultEnv.AppName
 }
 
-func (e *Env) GetRunMode() string {
-	return Default.RunMode
+func GetRunMode() string {
+	return defaultEnv.RunMode
 }
 
-func (e *Env) GetRootDir() string {
-	return Default.RootDir
+func GetAddr() string {
+	return defaultEnv.Addr
 }
 
-func (e *Env) GetConfDir() string {
-	return Default.ConfDir
+func GetRootDir() string {
+	return defaultEnv.RootDir
 }
 
-func (e *Env) GetLogDir() string {
-	return Default.LogDir
+func GetConfDir() string {
+	return defaultEnv.ConfDir
+}
+
+func GetLogDir() string {
+	return defaultEnv.LogDir
 }
