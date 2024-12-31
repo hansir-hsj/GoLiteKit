@@ -17,7 +17,6 @@ type Env struct {
 }
 
 func Init(path string) error {
-	cnf := config.NewAppConfig()
 	curPath, err := os.Getwd()
 	if err != nil {
 		return err
@@ -25,7 +24,7 @@ func Init(path string) error {
 	defaultEnv.RootDir = curPath
 	defaultEnv.ConfDir = curPath + "/conf"
 	defaultEnv.LogDir = curPath + "/log"
-	return cnf.Parse(path, defaultEnv)
+	return config.Parse(path, defaultEnv)
 }
 
 func GetAppName() string {
