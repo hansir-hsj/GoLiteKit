@@ -1,0 +1,3 @@
+dir = "log"
+filename = "test.log"
+level = 1
