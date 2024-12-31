@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	ErrFileEmpty = errors.New("file is empty")
+	ErrFileEmpty  = errors.New("file is empty")
+	defaultConfig = newAppConfig()
 )
 
 const (
@@ -36,45 +37,45 @@ type AppConfig struct {
 	Decoders map[string]Decoder
 }
 
-func NewAppConfig() *AppConfig {
+func newAppConfig() *AppConfig {
 	cnf := &AppConfig{
 		Decoders: make(map[string]Decoder),
 	}
-	cnf.Register(ExtJSON, JsonDecoder)
-	cnf.Register(ExtTOML, TomlDecoder)
-	cnf.Register(ExtYAML, YamlDecoder)
+	cnf.Decoders[ExtJSON] = JsonDecoder
+	cnf.Decoders[ExtTOML] = TomlDecoder
+	cnf.Decoders[ExtYAML] = YamlDecoder
 
 	return cnf
 }
 
-func (c *AppConfig) Register(ext string, decoder Decoder) error {
+func Register(ext string, decoder Decoder) error {
 	if decoder == nil {
 		return fmt.Errorf("decoder is nil")
 	}
-	if _, ok := c.Decoders[ext]; ok {
+	if _, ok := defaultConfig.Decoders[ext]; ok {
 		return fmt.Errorf("decoder already registered for extension: %s", ext)
 	}
-	c.Decoders[ext] = decoder
+	defaultConfig.Decoders[ext] = decoder
 
 	return nil
 }
 
-func (c *AppConfig) Parse(path string, obj any) error {
-	data, err := c.ReadFile(path)
+func Parse(path string, obj any) error {
+	data, err := ReadFile(path)
 	if err != nil {
 		return err
 	}
 	ext := filepath.Ext(path)
 
-	return c.ParseBytes(ext, data, obj)
+	return ParseBytes(ext, data, obj)
 }
 
-func (c *AppConfig) ParseBytes(ext string, data []byte, obj any) error {
+func ParseBytes(ext string, data []byte, obj any) error {
 	if data == nil {
 		return ErrFileEmpty
 	}
 
-	decoder, ok := c.Decoders[ext]
+	decoder, ok := defaultConfig.Decoders[ext]
 	if !ok {
 		return fmt.Errorf("decoder not found for extension: %s", ext)
 	}
@@ -91,7 +92,7 @@ func (c *AppConfig) ParseBytes(ext string, data []byte, obj any) error {
 	return nil
 }
 
-func (c *AppConfig) ReadFile(path string) ([]byte, error) {
+func ReadFile(path string) ([]byte, error) {
 	if path == "" {
 		return nil, nil
 	}
