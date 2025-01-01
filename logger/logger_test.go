@@ -1,9 +1,16 @@
 package logger
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestLoggerFromConfig(t *testing.T) {
 	log := NewLogger("logger.toml")
-	log.Trace("hello world")
-	log.Notice("hello world")
+	ctx := context.Background()
+	log.Debug(ctx, "debug")
+	log.Trace(ctx, "trace")
+	log.Info(ctx, "info")
+	log.Warning(ctx, "warning")
+	log.Fatal(ctx, "fatal")
 }
