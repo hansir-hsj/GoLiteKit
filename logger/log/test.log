@@ -1,8 +1,10 @@
-hello world
-hello world
-hello world
-hello world
-hello world
-hello world
-hello world
-hello world
+time=2025-01-01T23:33:10.411+08:00 level=DEBUG msg=debug
+time=2025-01-01T23:33:10.411+08:00 level=DEBUG+2 msg=trace
+time=2025-01-01T23:33:10.411+08:00 level=INFO msg=info
+time=2025-01-01T23:33:10.411+08:00 level=WARN msg=warning
+time=2025-01-01T23:33:10.411+08:00 level=ERROR+4 msg=fatal
+time=2025-01-01T23:40:23.105+08:00 level=DEBUG msg=debug
+time=2025-01-01T23:40:23.105+08:00 level=TRACE msg=trace
+time=2025-01-01T23:40:23.105+08:00 level=INFO msg=info
+time=2025-01-01T23:40:23.105+08:00 level=WARN msg=warning
+time=2025-01-01T23:40:23.105+08:00 level=FATAL msg=fatal
