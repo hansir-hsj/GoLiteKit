@@ -6,7 +6,7 @@ import (
 )
 
 func TestLoggerFromConfig(t *testing.T) {
-	log := NewLogger("logger.toml")
+	log, _ := NewLogger("logger.toml")
 	ctx := context.Background()
 	log.Debug(ctx, "debug")
 	log.Trace(ctx, "trace")
