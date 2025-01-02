@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"sync"
 )
 
 const (
@@ -18,6 +19,9 @@ type Context struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
 	routerParams   map[string]string
+
+	data     map[string]any
+	dataLock sync.Mutex
 }
 
 func GetContext(ctx context.Context) *Context {
@@ -31,10 +35,33 @@ func GetContext(ctx context.Context) *Context {
 func WithContext(ctx context.Context) context.Context {
 	gcx := GetContext(ctx)
 	if gcx == nil {
-		gcx = &Context{}
+		gcx = &Context{
+			data: make(map[string]any),
+		}
 		return context.WithValue(ctx, globalContextKey, gcx)
 	}
 	return ctx
+}
+
+func SetContextData(ctx context.Context, key string, data any) {
+	gcx := GetContext(ctx)
+	if gcx != nil {
+		gcx.dataLock.Lock()
+		defer gcx.dataLock.Unlock()
+		gcx.data[key] = data
+	}
+}
+
+func GetContextData(ctx context.Context, key string) (any, bool) {
+	gcx := GetContext(ctx)
+	if gcx != nil {
+		gcx.dataLock.Lock()
+		defer gcx.dataLock.Unlock()
+		if v, ok := gcx.data[key]; ok {
+			return v, true
+		}
+	}
+	return nil, false
 }
 
 func (gcx *Context) SetContextOptions(opts ...ContextOption) *Context {
