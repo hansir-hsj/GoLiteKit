@@ -35,15 +35,7 @@ func (l *StdLogger) log(ctx context.Context, level slog.Level, format string, ar
 }
 
 func NewStdLogger(logConf *LogConfig, opts *slog.HandlerOptions) (*StdLogger, error) {
-	var handler slog.Handler
-	switch logConf.Format {
-	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, opts)
-	case "text":
-		fallthrough
-	default:
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	}
+	handler := newContextHandler(os.Stdout, logConf.Format, opts)
 
 	return &StdLogger{
 		slog.New(handler),

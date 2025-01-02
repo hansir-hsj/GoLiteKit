@@ -20,15 +20,7 @@ func NewTextLogger(logConf *LogConfig, opts *slog.HandlerOptions) (*TextLogger, 
 		return nil, err
 	}
 
-	var handler slog.Handler
-	switch logConf.Format {
-	case "json", "JSON":
-		handler = slog.NewJSONHandler(target, opts)
-	case "text", "TEXT":
-		fallthrough
-	default:
-		handler = slog.NewTextHandler(target, opts)
-	}
+	handler := newContextHandler(target, logConf.Format, opts)
 
 	return &TextLogger{
 		StdLogger{slog.New(handler)},
