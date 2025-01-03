@@ -24,6 +24,11 @@ type Logger interface {
 	Info(ctx context.Context, format string, args ...any)
 	Warning(ctx context.Context, format string, args ...any)
 	Fatal(ctx context.Context, format string, args ...any)
+	AddDebug(ctx context.Context, key string, value any)
+	AddTrace(ctx context.Context, key string, value any)
+	AddInfo(ctx context.Context, key string, value any)
+	AddWarning(ctx context.Context, key string, value any)
+	AddFatal(ctx context.Context, key string, value any)
 }
 
 var LevelNames = map[slog.Leveler]string{
@@ -63,7 +68,7 @@ func parse(conf string) (*LogConfig, error) {
 	return &logConfig, nil
 }
 
-func NewLogger(conf string) (Logger, error) {
+func NewLogger(ctx context.Context, conf string) (Logger, error) {
 	logConf, err := parse(conf)
 	if err != nil {
 		return nil, err
@@ -90,8 +95,8 @@ func NewLogger(conf string) (Logger, error) {
 	}
 
 	if logConf.Dir != "" && logConf.FileName != "" {
-		return NewTextLogger(logConf, opts)
+		return NewTextLogger(ctx, logConf, opts)
 	}
 
-	return NewStdLogger(logConf, opts)
+	return NewConsoleLogger(ctx, logConf, opts)
 }

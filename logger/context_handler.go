@@ -7,40 +7,50 @@ import (
 	"strings"
 )
 
-type ctxKey string
+type loggerCtxKey string
 
 const (
-	slogFields ctxKey = "logger_slog_fields"
+	loggerKey loggerCtxKey = "logger_ctx_key"
 )
+
+type Field struct {
+	Level slog.Level
+	Key   string
+	Value any
+	Next  *Field
+}
+
+type LogContext struct {
+	Head *Field
+}
 
 type ContextHandler struct {
 	slog.Handler
 }
 
+// please call WithContext First
+func WithContext(ctx context.Context) context.Context {
+	ctx = context.WithValue(ctx, loggerKey, &LogContext{})
+	return ctx
+}
+
 // Handle adds contextual attributes to the Record before calling the underlying
 // handler
 func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if attrs, ok := ctx.Value(slogFields).([]slog.Attr); ok {
-		for _, v := range attrs {
-			r.AddAttrs(v)
+	if logCtx, ok := ctx.Value(loggerKey).(*LogContext); ok {
+		for node := logCtx.Head; node != nil; node = node.Next {
+			// skip lower level field
+			if node.Level < r.Level {
+				continue
+			}
+			attr := slog.Attr{
+				Key:   node.Key,
+				Value: slog.AnyValue(node.Value),
+			}
+			r.AddAttrs(attr)
 		}
 	}
 	return h.Handler.Handle(ctx, r)
-}
-
-// AppendCtx adds an slog attribute to the provided context so that it will be
-// included in any Record created with such context
-func AppendCtx(parent context.Context, attr slog.Attr) context.Context {
-	if parent == nil {
-		parent = context.Background()
-	}
-	if v, ok := parent.Value(slogFields).([]slog.Attr); ok {
-		v = append(v, attr)
-		return context.WithValue(parent, slogFields, v)
-	}
-	v := []slog.Attr{}
-	v = append(v, attr)
-	return context.WithValue(parent, slogFields, v)
 }
 
 func newContextHandler(target io.Writer, format string, opts *slog.HandlerOptions) *ContextHandler {
@@ -51,5 +61,35 @@ func newContextHandler(target io.Writer, format string, opts *slog.HandlerOption
 		fallthrough
 	default:
 		return &ContextHandler{slog.NewTextHandler(target, opts)}
+	}
+}
+
+func (logCtx *LogContext) add(key string, value any, level slog.Level) {
+	if logCtx == nil {
+		return
+	}
+
+	if logCtx.Head == nil {
+		logCtx.Head = &Field{
+			Level: level,
+			Key:   key,
+			Value: value,
+		}
+	}
+
+	var last *Field
+	for node := logCtx.Head; node != nil; node = node.Next {
+		if node.Key == key {
+			node.Value = value
+			node.Level = level
+			return
+		}
+		last = node
+	}
+
+	last.Next = &Field{
+		Level: level,
+		Key:   key,
+		Value: value,
 	}
 }
