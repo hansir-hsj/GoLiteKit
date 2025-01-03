@@ -14,7 +14,8 @@ func TestLoggerFromConfig(t *testing.T) {
 	log.Warning(ctx, "warning")
 	log.Fatal(ctx, "fatal")
 
-	log.AddDebug(ctx, "request-id", "request-id_testing")
-	log.AddDebug(ctx, "request-time", "request-time_testing")
+	AddDebug(ctx, "request-id", "request-id_testing")
+	AddInfo(ctx, "request-time", "request-time_testing")
+	AddWarning(ctx, "request-day", "request-day_testing")
 	log.Info(ctx, "info with context")
 }
