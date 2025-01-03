@@ -24,11 +24,6 @@ type Logger interface {
 	Info(ctx context.Context, format string, args ...any)
 	Warning(ctx context.Context, format string, args ...any)
 	Fatal(ctx context.Context, format string, args ...any)
-	AddDebug(ctx context.Context, key string, value any)
-	AddTrace(ctx context.Context, key string, value any)
-	AddInfo(ctx context.Context, key string, value any)
-	AddWarning(ctx context.Context, key string, value any)
-	AddFatal(ctx context.Context, key string, value any)
 }
 
 var LevelNames = map[slog.Leveler]string{

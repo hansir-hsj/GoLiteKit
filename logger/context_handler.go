@@ -93,3 +93,32 @@ func (logCtx *LogContext) add(key string, value any, level slog.Level) {
 		Value: value,
 	}
 }
+
+func AddDebug(ctx context.Context, key string, value any) {
+	addLog(ctx, LevelDebug, key, value)
+}
+
+func AddTrace(ctx context.Context, key string, value any) {
+	addLog(ctx, LevelTrace, key, value)
+}
+
+func AddInfo(ctx context.Context, key string, value any) {
+	addLog(ctx, LevelInfo, key, value)
+}
+
+func AddWarning(ctx context.Context, key string, value any) {
+	addLog(ctx, LevelWarning, key, value)
+}
+
+func AddFatal(ctx context.Context, key string, value any) {
+	addLog(ctx, LevelFatal, key, value)
+}
+
+func addLog(ctx context.Context, level slog.Level, key string, value any) {
+	lcx := ctx.Value(loggerKey)
+	logCtx, ok := lcx.(*LogContext)
+	if !ok {
+		panic("LogContext not init, please call WithContext first")
+	}
+	logCtx.add(key, value, level)
+}
