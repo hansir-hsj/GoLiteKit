@@ -1,16 +1,17 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
 )
 
 type TextLogger struct {
-	StdLogger
+	ConsoleLogger
 }
 
-func NewTextLogger(logConf *LogConfig, opts *slog.HandlerOptions) (*TextLogger, error) {
+func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOptions) (*TextLogger, error) {
 	err := os.MkdirAll(logConf.Dir, 0755)
 	if err != nil {
 		return nil, err
@@ -23,6 +24,8 @@ func NewTextLogger(logConf *LogConfig, opts *slog.HandlerOptions) (*TextLogger, 
 	handler := newContextHandler(target, logConf.Format, opts)
 
 	return &TextLogger{
-		StdLogger{slog.New(handler)},
+		ConsoleLogger{
+			logger: slog.New(handler),
+		},
 	}, nil
 }

@@ -1,4 +1,4 @@
 dir = "logs"
 filename = "test.log"
-level = "debug"
-format = "json"
+level = "trace"
+format = "text"
