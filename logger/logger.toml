@@ -1,4 +1,0 @@
-dir = "logs"
-filename = "test.log"
-level = "trace"
-format = "text"

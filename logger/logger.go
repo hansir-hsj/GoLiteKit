@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -45,6 +46,11 @@ type LogConfig struct {
 	FileName string `toml:"filename"`
 	MinLevel string `toml:"level"`
 	Format   string `toml:"format"`
+
+	// Rotator 相关
+	MaxAge   time.Duration `toml:"maxAge"`
+	MaxSize  int64         `toml:"maxSize"`
+	MaxLines int64         `toml:"maxLines"`
 }
 
 func parse(conf string) (*LogConfig, error) {
@@ -60,6 +66,17 @@ func parse(conf string) (*LogConfig, error) {
 		return nil, err
 	}
 	logConfig.Dir = absDir
+
+	if logConfig.MaxAge <= 30*time.Minute {
+		logConfig.MaxAge = 30 * time.Minute
+	}
+	if logConfig.MaxLines <= 10000 {
+		logConfig.MaxLines = 10000
+	}
+	if logConfig.MaxSize <= 10*1<<20 {
+		logConfig.MaxSize = 10 * 1 << 20
+	}
+
 	return &logConfig, nil
 }
 
