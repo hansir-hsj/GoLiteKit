@@ -63,19 +63,11 @@ func parse(conf string) (*LogConfig, error) {
 	return &logConfig, nil
 }
 
-func NewLogger(ctx context.Context, conf string) (Logger, error) {
-	logConf, err := parse(conf)
-	if err != nil {
-		return nil, err
-	}
-
-	logLevel, ok := LevelMap[strings.ToUpper(logConf.MinLevel)]
-	if !ok {
-		return nil, fmt.Errorf("invalid log level: %s", logConf.MinLevel)
-	}
-
+func NewLogger(ctx context.Context, conf ...string) (Logger, error) {
 	opts := &slog.HandlerOptions{
-		Level: logLevel,
+		Level:     LevelDebug,
+		AddSource: true,
+		// 自定义日志级别
 		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
 			if attr.Key == slog.LevelKey {
 				level := attr.Value.Any().(slog.Level)
@@ -88,6 +80,21 @@ func NewLogger(ctx context.Context, conf string) (Logger, error) {
 			return attr
 		},
 	}
+
+	if len(conf) == 0 {
+		return NewConsoleLogger(ctx, &LogConfig{MinLevel: "debug", Format: "text"}, opts)
+	}
+
+	logConf, err := parse(conf[0])
+	if err != nil {
+		return nil, err
+	}
+
+	logLevel, ok := LevelMap[strings.ToUpper(logConf.MinLevel)]
+	if !ok {
+		return nil, fmt.Errorf("invalid log level: %s", logConf.MinLevel)
+	}
+	opts.Level = logLevel
 
 	if logConf.Dir != "" && logConf.FileName != "" {
 		return NewTextLogger(ctx, logConf, opts)

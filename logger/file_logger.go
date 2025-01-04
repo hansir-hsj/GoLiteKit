@@ -7,11 +7,11 @@ import (
 	"os"
 )
 
-type TextLogger struct {
+type FileLogger struct {
 	ConsoleLogger
 }
 
-func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOptions) (*TextLogger, error) {
+func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOptions) (*FileLogger, error) {
 	err := os.MkdirAll(logConf.Dir, 0755)
 	if err != nil {
 		return nil, err
@@ -23,7 +23,7 @@ func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOp
 
 	handler := newContextHandler(target, logConf.Format, opts)
 
-	return &TextLogger{
+	return &FileLogger{
 		ConsoleLogger{
 			logger: slog.New(handler),
 		},

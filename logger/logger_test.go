@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLoggerFromConfig(t *testing.T) {
+func TestLogger(t *testing.T) {
 	ctx := WithContext(context.Background())
 	log, _ := NewLogger(ctx, "logger.toml")
 	log.Debug(ctx, "debug")
@@ -18,4 +18,30 @@ func TestLoggerFromConfig(t *testing.T) {
 	AddInfo(ctx, "request-time", "request-time_testing")
 	AddWarning(ctx, "request-day", "request-day_testing")
 	log.Info(ctx, "info with context")
+}
+
+func TestStruct(t *testing.T) {
+	type User struct {
+		ID        string `json:"id"`
+		FirstName string `json:"first_name"`
+		LastName  string `json:"last_name"`
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+	}
+	ctx := WithContext(context.Background())
+	log, _ := NewLogger(ctx, "logger.toml")
+	u := &User{
+		ID:        "user-12234",
+		FirstName: "Jan",
+		LastName:  "Doe",
+		Email:     "jan@example.com",
+		Password:  "pass-12334",
+	}
+	log.Info(ctx, "info", "user", u)
+}
+
+func TestConsole(t *testing.T) {
+	ctx := WithContext(context.Background())
+	log, _ := NewLogger(ctx)
+	log.Debug(ctx, "debug")
 }
