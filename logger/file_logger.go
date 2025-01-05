@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var _ Rotater = (*FileLogger)(nil)
+
 type FileLogger struct {
 	logConf *LogConfig
 	opts    *slog.HandlerOptions
@@ -40,11 +42,12 @@ func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOp
 	handler := newContextHandler(target, logConf.Format, opts)
 
 	return &FileLogger{
-		logConf:  logConf,
-		opts:     opts,
-		filePath: filePath,
-		logger:   slog.New(handler),
-		file:     target,
+		logConf:    logConf,
+		opts:       opts,
+		filePath:   filePath,
+		logger:     slog.New(handler),
+		file:       target,
+		LastRotate: time.Now(),
 	}, nil
 }
 
@@ -63,7 +66,7 @@ func (l *FileLogger) NeedRotate() bool {
 	if fi.Size() >= l.logConf.MaxSize {
 		return true
 	}
-	if !l.LastRotate.IsZero() && time.Since(l.LastRotate) >= l.logConf.MaxAge {
+	if time.Since(l.LastRotate) >= l.logConf.MaxAge {
 		return true
 	}
 
@@ -74,7 +77,7 @@ func (l *FileLogger) Rotate() error {
 	if err := l.file.Close(); err != nil {
 		return err
 	}
-	newFilePath := l.filePath + "." + time.Now().Format("20060102150405")
+	newFilePath := l.NewFilePath(l.filePath)
 	if err := os.Rename(l.filePath, newFilePath); err != nil {
 		return err
 	}
@@ -91,6 +94,24 @@ func (l *FileLogger) Rotate() error {
 	l.LastRotate = time.Now()
 
 	return nil
+}
+
+func (l *FileLogger) NewFilePath(filePath string) string {
+	since := time.Since(l.LastRotate)
+	now := time.Now()
+	if since > 24*time.Hour {
+		return filePath + "." + now.Format("20060102")
+	}
+	if since > time.Hour {
+		return filePath + "." + now.Format("20060102-15")
+	}
+	if since > 10*time.Minute {
+		minute := now.Minute()
+		minuteMod := minute % 10
+		return filePath + "." + fmt.Sprintf("%s-%02d", now.Format("20060102-15"), minuteMod)
+	}
+
+	return filePath + "." + time.Now().Format("20060102-150405")
 }
 
 func (l *FileLogger) Debug(ctx context.Context, format string, args ...any) {

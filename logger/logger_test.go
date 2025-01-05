@@ -49,7 +49,7 @@ func TestConsole(t *testing.T) {
 func TestRotate(t *testing.T) {
 	ctx := WithContext(context.Background())
 	log, _ := NewLogger(ctx, "logs/logger.toml")
-	for i := 0; i < 11; i++ {
+	for i := 0; i < 10000; i++ {
 		log.Info(ctx, "info", "times", i)
 	}
 	log.Trace(ctx, "new file")
