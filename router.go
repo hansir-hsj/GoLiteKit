@@ -2,6 +2,8 @@ package golite
 
 import (
 	"context"
+	"github/hsj/golite/env"
+	"github/hsj/golite/logger"
 	"log"
 	"net/http"
 	"strings"
@@ -66,11 +68,19 @@ func (r *Router) Route(method, path string) (Controller, map[string]string, bool
 }
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	ctx := req.Context()
+	ctx := logger.WithContext(req.Context())
+	logit, err := logger.NewLogger(ctx, env.GetLogger())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 
 	ctx = WithContext(ctx)
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
+	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w), WithLogger(logit))
+
+	logger.AddInfo(ctx, "method", gcx.request.Method)
+	logger.AddInfo(ctx, "url", gcx.request.URL)
 
 	controller, params, ok := r.Route(req.Method, req.URL.Path)
 	if !ok {
@@ -98,6 +108,10 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		err = controller.Serve(ctx)
+		if err != nil {
+			return
+		}
+		err = controller.Finalize(ctx)
 		if err != nil {
 			return
 		}

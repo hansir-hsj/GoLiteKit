@@ -2,6 +2,7 @@ package golite
 
 import (
 	"context"
+	"github/hsj/golite/logger"
 	"log"
 	"net/http"
 	"sync"
@@ -19,6 +20,7 @@ type Context struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
 	routerParams   map[string]string
+	logger         logger.Logger
 
 	data     map[string]any
 	dataLock sync.Mutex
@@ -89,6 +91,12 @@ func WithRouterParams(params map[string]string) ContextOption {
 	}
 }
 
+func WithLogger(logger logger.Logger) ContextOption {
+	return func(gcx *Context) {
+		gcx.logger = logger
+	}
+}
+
 func (ctx *Context) Request() *http.Request {
 	return ctx.request
 }
@@ -99,6 +107,10 @@ func (ctx *Context) ResponseWriter() http.ResponseWriter {
 
 func (ctx *Context) RouterParams() map[string]string {
 	return ctx.routerParams
+}
+
+func (ctx *Context) Logger() logger.Logger {
+	return ctx.logger
 }
 
 func (ctx *Context) ServeRawData(data any) {
