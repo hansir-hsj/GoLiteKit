@@ -3,6 +3,7 @@ package env
 import (
 	"github/hsj/golite/config"
 	"os"
+	"path/filepath"
 )
 
 var defaultEnv = &Env{}
@@ -11,9 +12,10 @@ type Env struct {
 	AppName string `toml:"appName"`
 	RunMode string `toml:"runMode"`
 	Addr    string `toml:"addr"`
+	Logger  string `toml:"logger"`
+
 	RootDir string
 	ConfDir string
-	LogDir  string
 }
 
 func Init(path string) error {
@@ -23,8 +25,13 @@ func Init(path string) error {
 	}
 	defaultEnv.RootDir = curPath
 	defaultEnv.ConfDir = curPath + "/conf"
-	defaultEnv.LogDir = curPath + "/log"
-	return config.Parse(path, defaultEnv)
+	err = config.Parse(path, defaultEnv)
+	if err != nil {
+		return err
+	}
+	defaultEnv.Logger = filepath.Join(defaultEnv.ConfDir, defaultEnv.Logger)
+
+	return nil
 }
 
 func GetAppName() string {
@@ -47,6 +54,6 @@ func GetConfDir() string {
 	return defaultEnv.ConfDir
 }
 
-func GetLogDir() string {
-	return defaultEnv.LogDir
+func GetLogger() string {
+	return defaultEnv.Logger
 }

@@ -3,6 +3,7 @@ package golite
 import (
 	"bytes"
 	"context"
+	"github/hsj/golite/logger"
 	"io"
 	"net/http"
 	"strconv"
@@ -17,11 +18,13 @@ type Controller interface {
 	MaxMemorySize() int64
 	Init(ctx context.Context) error
 	Serve(ctx context.Context) error
+	Finalize(ctx context.Context) error
 }
 
 type BaseController struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
+	logger         logger.Logger
 
 	rawBody []byte
 
@@ -36,12 +39,18 @@ func (c *BaseController) Init(ctx context.Context) error {
 	c.gcx = GetContext(ctx)
 	c.request = c.gcx.Request()
 	c.responseWriter = c.gcx.ResponseWriter()
+	c.logger = c.gcx.logger
 	c.parseBody()
 
 	return nil
 }
 
 func (c *BaseController) Serve(ctx context.Context) error {
+	return nil
+}
+
+func (c *BaseController) Finalize(ctx context.Context) error {
+	c.logger.Info(ctx, "ok")
 	return nil
 }
 
