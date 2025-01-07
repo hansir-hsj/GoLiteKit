@@ -105,6 +105,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	go func() {
 		defer func() {
 			if p := recover(); p != nil {
+				panicLogInst.Report(ctx, p)
 				panicChan <- p
 			}
 		}()
@@ -126,7 +127,6 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	select {
 	case p := <-panicChan:
 		log.Printf("%v", p)
-		panicLogInst.Report(ctx, p)
 	case <-ctx.Done():
 		log.Print("timeout")
 	case <-doneChan:

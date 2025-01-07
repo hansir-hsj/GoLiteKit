@@ -45,7 +45,7 @@ func NewPanicLogger(ctx context.Context, confDir ...string) (*PanicLogger, error
 }
 
 func (l *PanicLogger) caller() string {
-	_, file, line, ok := runtime.Caller(2)
+	_, file, line, ok := runtime.Caller(4)
 	if !ok {
 		return ""
 	}
