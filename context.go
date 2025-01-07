@@ -21,6 +21,7 @@ type Context struct {
 	responseWriter http.ResponseWriter
 	routerParams   map[string]string
 	logger         logger.Logger
+	panicLogger    *logger.PanicLogger
 
 	data     map[string]any
 	dataLock sync.Mutex
@@ -94,6 +95,12 @@ func WithRouterParams(params map[string]string) ContextOption {
 func WithLogger(logger logger.Logger) ContextOption {
 	return func(gcx *Context) {
 		gcx.logger = logger
+	}
+}
+
+func WithPanicLogger(pl *logger.PanicLogger) ContextOption {
+	return func(gcx *Context) {
+		gcx.panicLogger = pl
 	}
 }
 

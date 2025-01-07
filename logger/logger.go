@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"github/hsj/golite/config"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
+)
+
+const (
+	LoggerConfigFile = "logger.toml"
 )
 
 const (
@@ -80,7 +85,7 @@ func parse(conf string) (*LogConfig, error) {
 	return &logConfig, nil
 }
 
-func NewLogger(ctx context.Context, conf ...string) (Logger, error) {
+func NewLogger(ctx context.Context, confDir ...string) (Logger, error) {
 	opts := &slog.HandlerOptions{
 		Level:     LevelDebug,
 		AddSource: true,
@@ -98,11 +103,17 @@ func NewLogger(ctx context.Context, conf ...string) (Logger, error) {
 		},
 	}
 
-	if len(conf) == 0 {
-		return NewConsoleLogger(ctx, &LogConfig{MinLevel: "debug", Format: "text"}, opts)
+	if len(confDir) == 0 {
+		dir, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		return NewConsoleLogger(ctx, &LogConfig{Dir: dir, MinLevel: "debug", Format: "text"}, opts)
 	}
 
-	logConf, err := parse(conf[0])
+	loggerConfig := filepath.Join(confDir[0], LoggerConfigFile)
+
+	logConf, err := parse(loggerConfig)
 	if err != nil {
 		return nil, err
 	}

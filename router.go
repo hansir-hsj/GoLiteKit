@@ -69,7 +69,12 @@ func (r *Router) Route(method, path string) (Controller, map[string]string, bool
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := logger.WithContext(req.Context())
-	logit, err := logger.NewLogger(ctx, env.GetLogger())
+	logInst, err := logger.NewLogger(ctx, env.GetConfDir())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	panicLogInst, err := logger.NewPanicLogger(ctx, env.GetConfDir())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -77,7 +82,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	ctx = WithContext(ctx)
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w), WithLogger(logit))
+	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w), WithLogger(logInst), WithPanicLogger(panicLogInst))
 
 	logger.AddInfo(ctx, "method", gcx.request.Method)
 	logger.AddInfo(ctx, "url", gcx.request.URL)
@@ -121,6 +126,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	select {
 	case p := <-panicChan:
 		log.Printf("%v", p)
+		panicLogInst.Report(ctx, p)
 	case <-ctx.Done():
 		log.Print("timeout")
 	case <-doneChan:
