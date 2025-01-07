@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 )
 
 type PanicLogger struct {
@@ -42,10 +44,19 @@ func NewPanicLogger(ctx context.Context, confDir ...string) (*PanicLogger, error
 	}, nil
 }
 
+func (l *PanicLogger) caller() string {
+	_, file, line, ok := runtime.Caller(2)
+	if !ok {
+		return ""
+	}
+	return strings.Join([]string{file, strconv.Itoa(line)}, ":")
+}
+
 func (l *PanicLogger) Report(ctx context.Context, p any) {
-	msg := fmt.Sprintf("Recover from panic: %v\n", p)
-	stack := make([]byte, 0, 4096)
+	msg := fmt.Sprintf("Recover from panic: %v", p)
+	stack := make([]byte, 4096)
 	length := runtime.Stack(stack, false)
 	stack = stack[:length]
-	fmt.Fprintf(l.file, "%s%s\n", msg, stack)
+
+	fmt.Fprintf(l.file, "%s\n%s\nStack:\n%s\n", msg, l.caller(), stack)
 }
