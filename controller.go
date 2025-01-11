@@ -50,7 +50,6 @@ func (c *BaseController) Serve(ctx context.Context) error {
 }
 
 func (c *BaseController) Finalize(ctx context.Context) error {
-	c.logger.Info(ctx, "ok")
 	return nil
 }
 
@@ -269,4 +268,24 @@ func (c *BaseController) RouterParamBool(key string, def bool) bool {
 		return val == "1" || strings.ToLower(val) == "true"
 	}
 	return def
+}
+
+func (c *BaseController) AddDebug(ctx context.Context, key string, value any) {
+	logger.AddDebug(ctx, key, value)
+}
+
+func (c *BaseController) AddTrace(ctx context.Context, key string, value any) {
+	logger.AddTrace(ctx, key, value)
+}
+
+func (c *BaseController) AddInfo(ctx context.Context, key string, value any) {
+	logger.AddInfo(ctx, key, value)
+}
+
+func (c *BaseController) AddWarning(ctx context.Context, key string, value any) {
+	logger.AddWarning(ctx, key, value)
+}
+
+func (c *BaseController) AddFatal(ctx context.Context, key string, value any) {
+	logger.AddFatal(ctx, key, value)
 }

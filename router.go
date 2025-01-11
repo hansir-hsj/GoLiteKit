@@ -69,6 +69,7 @@ func (r *Router) Route(method, path string) (Controller, map[string]string, bool
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := logger.WithContext(req.Context())
+
 	logInst, err := logger.NewLogger(ctx, env.GetConfDir())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -109,6 +110,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 				panicChan <- p
 			}
 		}()
+		ctx = WithTracker(ctx)
+		tracker := GetTracker(ctx)
+		gcx = GetContext(ctx)
+		logInst := gcx.Logger()
+
 		err := controller.Init(ctx)
 		if err != nil {
 			return
@@ -121,6 +127,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			return
 		}
+		tracker.LogTracker(ctx)
+		logInst.Info(ctx, "ok")
+
 		doneChan <- struct{}{}
 	}()
 
