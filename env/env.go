@@ -3,6 +3,7 @@ package env
 import (
 	"github/hsj/golite/config"
 	"os"
+	"time"
 )
 
 var defaultEnv = &Env{}
@@ -11,6 +12,10 @@ type Env struct {
 	AppName string `toml:"appName"`
 	RunMode string `toml:"runMode"`
 	Addr    string `toml:"addr"`
+
+	ReadTimeout  int `toml:"readTimeout"`
+	WriteTimeout int `toml:"writeTimeout"`
+	IdleTimeout  int `toml:"idleTimeout"`
 
 	RootDir string
 	ConfDir string
@@ -31,22 +36,34 @@ func Init(path string) error {
 	return nil
 }
 
-func GetAppName() string {
+func AppName() string {
 	return defaultEnv.AppName
 }
 
-func GetRunMode() string {
+func RunMode() string {
 	return defaultEnv.RunMode
 }
 
-func GetAddr() string {
+func Addr() string {
 	return defaultEnv.Addr
 }
 
-func GetRootDir() string {
+func RootDir() string {
 	return defaultEnv.RootDir
 }
 
-func GetConfDir() string {
+func ConfDir() string {
 	return defaultEnv.ConfDir
+}
+
+func ReadTimeout() time.Duration {
+	return time.Duration(defaultEnv.ReadTimeout) * time.Millisecond
+}
+
+func WriteTimeout() time.Duration {
+	return time.Duration(defaultEnv.WriteTimeout) * time.Millisecond
+}
+
+func IdleTimeout() time.Duration {
+	return time.Duration(defaultEnv.IdleTimeout) * time.Millisecond
 }
