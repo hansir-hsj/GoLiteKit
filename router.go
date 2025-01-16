@@ -70,12 +70,12 @@ func (r *Router) Route(method, path string) (Controller, map[string]string, bool
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := logger.WithContext(req.Context())
 
-	logInst, err := logger.NewLogger(ctx, env.GetConfDir())
+	logInst, err := logger.NewLogger(ctx, env.ConfDir())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	panicLogInst, err := logger.NewPanicLogger(ctx, env.GetConfDir())
+	panicLogInst, err := logger.NewPanicLogger(ctx, env.ConfDir())
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return

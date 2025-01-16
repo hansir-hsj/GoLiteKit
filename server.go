@@ -2,14 +2,12 @@ package golite
 
 import (
 	"github/hsj/golite/env"
-	"net"
 	"net/http"
 )
 
 type Server struct {
-	addr       string
-	httpServer http.Server
-	router     Router
+	addr   string
+	router Router
 }
 
 func New(conf string) *Server {
@@ -20,21 +18,20 @@ func New(conf string) *Server {
 	}
 
 	return &Server{
-		addr: env.GetAddr(),
-		httpServer: http.Server{
-			Handler: &router,
-		},
+		addr:   env.Addr(),
 		router: router,
 	}
 }
 
 func (s *Server) Start() error {
-	l, err := net.Listen("tcp4", s.addr)
-	if err != nil {
-		return err
+	server := http.Server{
+		Addr:         s.addr,
+		Handler:      &s.router,
+		ReadTimeout:  env.ReadTimeout(),
+		WriteTimeout: env.WriteTimeout(),
+		IdleTimeout:  env.IdleTimeout(),
 	}
-	s.httpServer.Serve(l)
-	return nil
+	return server.ListenAndServe()
 }
 
 func (s *Server) OnGet(path string, controller Controller) {
