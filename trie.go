@@ -37,7 +37,8 @@ func isWildWord(word string) bool {
 // /user/:id/name
 // /user/:status/name
 func (t *Trie) Add(path string, controller Controller) {
-	words := strings.Split(path, "/")
+	trimed := strings.Trim(path, "/")
+	words := strings.Split(trimed, "/")
 	node := t.root
 
 	for _, w := range words {
@@ -77,7 +78,8 @@ func (t *Trie) Add(path string, controller Controller) {
 // Get path /user/123456/name
 // params: id = 123456
 func (t *Trie) Get(path string) (Controller, map[string]string, bool) {
-	words := strings.Split(path, "/")
+	trimed := strings.Trim(path, "/")
+	words := strings.Split(trimed, "/")
 	node := t.root
 	params := make(map[string]string)
 
