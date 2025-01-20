@@ -120,6 +120,10 @@ func (ctx *Context) Logger() logger.Logger {
 	return ctx.logger
 }
 
+func (ctx *Context) PanicLogger() *logger.PanicLogger {
+	return ctx.panicLogger
+}
+
 func (ctx *Context) ServeRawData(data any) {
 	header := ctx.responseWriter.Header()
 	switch body := data.(type) {
@@ -134,7 +138,7 @@ func (ctx *Context) ServeRawData(data any) {
 		}
 		ctx.responseWriter.Write([]byte(body))
 	default:
-		log.Printf("unsported response data type： %T", data)
+		log.Printf("unsupported response data type： %T", data)
 	}
 }
 
