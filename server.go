@@ -1,17 +1,14 @@
 package golite
 
 import (
-	"context"
 	"github/hsj/golite/env"
-	"github/hsj/golite/logger"
-	"log"
 	"net/http"
-	"time"
 )
 
 type Server struct {
-	addr   string
-	router Router
+	addr            string
+	router          Router
+	middlewareQueue MiddlewareQueue
 }
 
 func New(conf string) *Server {
@@ -22,8 +19,9 @@ func New(conf string) *Server {
 	}
 
 	return &Server{
-		addr:   env.Addr(),
-		router: router,
+		addr:            env.Addr(),
+		router:          router,
+		middlewareQueue: NewMiddlewareQueue(),
 	}
 }
 
@@ -35,7 +33,13 @@ func (s *Server) Start() error {
 		IdleTimeout:  env.IdleTimeout(),
 		Handler:      s,
 	}
+	s.Use(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware)
+
 	return server.ListenAndServe()
+}
+
+func (s *Server) Use(middlewares ...Middleware) {
+	s.middlewareQueue = append(s.middlewareQueue, middlewares...)
 }
 
 func (s *Server) OnGet(path string, controller Controller) {
@@ -55,25 +59,9 @@ func (s *Server) OnDelete(path string, controller Controller) {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	ctx := logger.WithContext(req.Context())
-
-	logInst, err := logger.NewLogger(ctx, env.ConfDir())
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	panicLogInst, err := logger.NewPanicLogger(ctx, env.ConfDir())
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
-	ctx = WithContext(ctx)
+	ctx := WithContext(req.Context())
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w), WithLogger(logInst), WithPanicLogger(panicLogInst))
-
-	logger.AddInfo(ctx, "method", gcx.request.Method)
-	logger.AddInfo(ctx, "url", gcx.request.URL)
+	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
 	controller, params, ok := s.router.Route(req.Method, req.URL.Path)
 	if !ok {
@@ -83,48 +71,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if params != nil {
 		gcx.SetContextOptions(WithRouterParams(params))
 	}
+	s.Use(ControllerAsMiddleware(ctx, controller, w, req))
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	doneChan := make(chan struct{}, 1)
-	panicChan := make(chan any, 1)
-
-	go func() {
-		defer func() {
-			if p := recover(); p != nil {
-				panicLogInst.Report(ctx, p)
-				panicChan <- p
-			}
-		}()
-		ctx = WithTracker(ctx)
-		tracker := GetTracker(ctx)
-		gcx = GetContext(ctx)
-		logInst := gcx.Logger()
-
-		err := controller.Init(ctx)
-		if err != nil {
-			return
-		}
-		err = controller.Serve(ctx)
-		if err != nil {
-			return
-		}
-		err = controller.Finalize(ctx)
-		if err != nil {
-			return
-		}
-		tracker.LogTracker(ctx)
-		logInst.Info(ctx, "ok")
-
-		doneChan <- struct{}{}
-	}()
-
-	select {
-	case p := <-panicChan:
-		log.Printf("%v", p)
-	case <-ctx.Done():
-		log.Print("timeout")
-	case <-doneChan:
-	}
+	s.middlewareQueue.Next(ctx, w, req)
 }

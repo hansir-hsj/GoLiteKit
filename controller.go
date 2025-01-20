@@ -289,3 +289,21 @@ func (c *BaseController) AddWarning(ctx context.Context, key string, value any) 
 func (c *BaseController) AddFatal(ctx context.Context, key string, value any) {
 	logger.AddFatal(ctx, key, value)
 }
+
+func ControllerAsMiddleware(ctx context.Context, controller Controller, w http.ResponseWriter, req *http.Request) Middleware {
+	return func(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
+		err := controller.Init(ctx)
+		if err != nil {
+			return err
+		}
+		err = controller.Serve(ctx)
+		if err != nil {
+			return err
+		}
+		err = controller.Finalize(ctx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+}
