@@ -33,6 +33,7 @@ func (s *Server) Start() error {
 		ReadTimeout:  env.ReadTimeout(),
 		WriteTimeout: env.WriteTimeout(),
 		IdleTimeout:  env.IdleTimeout(),
+		Handler:      s,
 	}
 	return server.ListenAndServe()
 }
