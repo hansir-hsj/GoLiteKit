@@ -17,6 +17,9 @@ type Env struct {
 	WriteTimeout int `toml:"writeTimeout"`
 	IdleTimeout  int `toml:"idleTimeout"`
 
+	RateLimit int `toml:"rateLimit"`
+	RateBurst int `toml:"rateBurst"`
+
 	RootDir string
 	ConfDir string
 }
@@ -66,4 +69,15 @@ func WriteTimeout() time.Duration {
 
 func IdleTimeout() time.Duration {
 	return time.Duration(defaultEnv.IdleTimeout) * time.Millisecond
+}
+
+func RateLimit() int {
+	return defaultEnv.RateLimit
+}
+
+func RateBurst() int {
+	if defaultEnv.RateBurst == 0 {
+		return defaultEnv.RateLimit
+	}
+	return defaultEnv.RateBurst
 }
