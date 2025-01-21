@@ -9,6 +9,7 @@ type Server struct {
 	addr            string
 	router          Router
 	middlewareQueue MiddlewareQueue
+	rateLimiter     *RateLimiter
 }
 
 func New(conf string) *Server {
@@ -18,10 +19,16 @@ func New(conf string) *Server {
 		return nil
 	}
 
+	var rateLimiter *RateLimiter
+	if env.RateLimit() > 0 {
+		rateLimiter = NewRateLimiter(env.RateLimit(), env.RateBurst())
+	}
+
 	return &Server{
 		addr:            env.Addr(),
 		router:          router,
 		middlewareQueue: NewMiddlewareQueue(),
+		rateLimiter:     rateLimiter,
 	}
 }
 
@@ -62,6 +69,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := WithContext(req.Context())
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
+
+	if s.rateLimiter != nil {
+		s.Use(s.rateLimiter.RateLimiterAsMiddleware(ctx, w, req, s.middlewareQueue))
+	}
 
 	controller, params, ok := s.router.Route(req.Method, req.URL.Path)
 	if !ok {
