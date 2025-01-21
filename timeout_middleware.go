@@ -2,13 +2,14 @@ package golite
 
 import (
 	"context"
+	"github/hsj/golite/env"
 	"log"
 	"net/http"
-	"time"
 )
 
 func TimeoutMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	timeout := env.WriteTimeout() - env.ReadTimeout()
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	doneChan := make(chan struct{}, 1)
