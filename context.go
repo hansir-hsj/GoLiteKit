@@ -128,14 +128,10 @@ func (ctx *Context) ServeRawData(data any) {
 	header := ctx.responseWriter.Header()
 	switch body := data.(type) {
 	case []byte:
-		if header.Get("Content-Type") == "" {
-			header.Set("Content-Type", "application/octet-stream")
-		}
+		header.Set("Content-Type", "application/octet-stream")
 		ctx.responseWriter.Write(body)
 	case string:
-		if header.Get("Content-Type") == "" {
-			header.Set("Content-Type", "text/plain; charset=UTF-8")
-		}
+		header.Set("Content-Type", "text/plain; charset=UTF-8")
 		ctx.responseWriter.Write([]byte(body))
 	default:
 		log.Printf("unsupported response data type： %T", data)
@@ -144,8 +140,6 @@ func (ctx *Context) ServeRawData(data any) {
 
 func (ctx *Context) ServeJSON(data any) {
 	header := ctx.responseWriter.Header()
-	if header.Get("Content-Type") == "" {
-		header.Set("Content-Type", "application/json")
-	}
+	header.Set("Content-Type", "application/json")
 	ctx.ServeRawData(data)
 }
