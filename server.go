@@ -1,8 +1,13 @@
 package golite
 
 import (
+	"context"
+	"fmt"
 	"github/hsj/golite/env"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 type Server struct {
@@ -10,6 +15,9 @@ type Server struct {
 	router          Router
 	middlewareQueue MiddlewareQueue
 	rateLimiter     *RateLimiter
+
+	httpServer http.Server
+	closeChan  chan struct{}
 }
 
 func New(conf string) *Server {
@@ -29,11 +37,12 @@ func New(conf string) *Server {
 		router:          router,
 		middlewareQueue: NewMiddlewareQueue(),
 		rateLimiter:     rateLimiter,
+		closeChan:       make(chan struct{}),
 	}
 }
 
-func (s *Server) Start() error {
-	server := http.Server{
+func (s *Server) Start() {
+	s.httpServer = http.Server{
 		Addr:         s.addr,
 		ReadTimeout:  env.ReadTimeout(),
 		WriteTimeout: env.WriteTimeout(),
@@ -42,7 +51,27 @@ func (s *Server) Start() error {
 	}
 	s.Use(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware)
 
-	return server.ListenAndServe()
+	go s.handleSignal()
+
+	err := s.httpServer.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		fmt.Printf("server start error: %v", err)
+	}
+	<-s.closeChan
+}
+
+func (s *Server) handleSignal() {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	switch sig {
+	case syscall.SIGINT:
+		fmt.Println("server shutdown by SIGINT")
+	case syscall.SIGTERM:
+		fmt.Println("server shutdown by SIGTERM")
+	}
+	s.httpServer.Shutdown(context.Background())
+	s.closeChan <- struct{}{}
 }
 
 func (s *Server) Use(middlewares ...Middleware) {
