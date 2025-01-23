@@ -1,6 +1,6 @@
 package logger
 
-type Rotater interface {
+type Rotator interface {
 	NeedRotate() bool
 	Rotate() error
 	NewFilePath(filePath string) string
