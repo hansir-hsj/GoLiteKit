@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var _ Rotater = (*FileLogger)(nil)
+var _ Rotator = (*FileLogger)(nil)
 
 type FileLogger struct {
 	logConf *LogConfig

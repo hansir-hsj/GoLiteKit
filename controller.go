@@ -290,6 +290,26 @@ func (c *BaseController) AddFatal(ctx context.Context, key string, value any) {
 	logger.AddFatal(ctx, key, value)
 }
 
+func (c *BaseController) Debug(ctx context.Context, format string, args ...any) {
+	c.logger.Debug(ctx, format, args...)
+}
+
+func (c *BaseController) Trace(ctx context.Context, format string, args ...any) {
+	c.logger.Trace(ctx, format, args...)
+}
+
+func (c *BaseController) Info(ctx context.Context, format string, args ...any) {
+	c.logger.Info(ctx, format, args...)
+}
+
+func (c *BaseController) Warning(ctx context.Context, format string, args ...any) {
+	c.logger.Warning(ctx, format, args...)
+}
+
+func (c *BaseController) Fatal(ctx context.Context, format string, args ...any) {
+	c.logger.Fatal(ctx, format, args...)
+}
+
 func ControllerAsMiddleware(ctx context.Context, controller Controller, w http.ResponseWriter, req *http.Request) Middleware {
 	return func(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
 		err := controller.Init(ctx)
