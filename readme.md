@@ -1,6 +1,6 @@
 # golite
 
-[英文](readme.md) [中文](readme-zh.md)
+[英文](readme.md) [中文](readme.zh.md)
 
 A concise and lightweight Go language framework for rapid development of web applications.
 

@@ -1,6 +1,6 @@
 # golite
 
-[英文](readme.md) [中文](readme-zh.md)
+[英文](readme.md) [中文](readme.zh.md)
 
 简洁轻量的go语言框架，用于快速开发web应用
 
@@ -17,3 +17,4 @@
    - 超时中间件
    - 请求追踪中间件
    - 基于`golang.org/x/time/rate`的限流中间件
+6. 支持静态文件服务
