@@ -21,6 +21,10 @@ type Controller interface {
 	Finalize(ctx context.Context) error
 }
 
+type StaticController interface {
+	SetPath(ctx context.Context, path string)
+}
+
 type BaseController struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
