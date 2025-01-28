@@ -7,31 +7,42 @@ import (
 
 type Router struct {
 	// method -> path -> controller
+	static      map[string]Controller
 	routers     map[string]map[string]Controller
 	wildRouters map[string]*Trie
 }
 
 func NewRouter() Router {
 	return Router{
+		static:      make(map[string]Controller),
 		routers:     make(map[string]map[string]Controller, 4),
 		wildRouters: make(map[string]*Trie, 4),
 	}
 }
 
 func (r *Router) OnPost(path string, controller Controller) {
+	path = ensureLeadingSlash(path)
 	r.register(http.MethodPost, path, controller)
 }
 
 func (r *Router) OnGet(path string, controller Controller) {
+	path = ensureLeadingSlash(path)
 	r.register(http.MethodGet, path, controller)
 }
 
 func (r *Router) OnPut(path string, controller Controller) {
+	path = ensureLeadingSlash(path)
 	r.register(http.MethodPut, path, controller)
 }
 
 func (r *Router) OnDelete(path string, controller Controller) {
+	path = ensureLeadingSlash(path)
 	r.register(http.MethodDelete, path, controller)
+}
+
+func (r *Router) Static(path string, controller Controller) {
+	path = ensureLeadingSlash(path)
+	r.static[path] = controller
 }
 
 func (r *Router) register(method, path string, controller Controller) {
@@ -48,16 +59,33 @@ func (r *Router) register(method, path string, controller Controller) {
 	}
 }
 
+func ensureLeadingSlash(path string) string {
+	if !strings.HasPrefix(path, "/") {
+		return "/" + path
+	}
+	return path
+}
+
 func (r *Router) Route(method, path string) (Controller, map[string]string, bool) {
-	// 先匹配普通路由
+	path = ensureLeadingSlash(path)
+
+	// match regular routes first
 	if router, ok := r.routers[method]; ok {
 		if controller, ok := router[path]; ok {
 			return controller, nil, true
 		}
 	}
-	// 再匹配带参数的路由
+
+	// re match wild routes
 	if trie, ok := r.wildRouters[method]; ok {
 		return trie.Get(path)
+	}
+
+	// finally match static routes
+	if method == http.MethodGet && strings.HasPrefix(path, "/") {
+		if controller, ok := r.static[path]; ok {
+			return controller, nil, true
+		}
 	}
 	return nil, nil, false
 }

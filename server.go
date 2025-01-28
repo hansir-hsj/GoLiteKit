@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -92,6 +94,55 @@ func (s *Server) OnPut(path string, controller Controller) {
 
 func (s *Server) OnDelete(path string, controller Controller) {
 	s.router.OnDelete(path, controller)
+}
+
+func (s *Server) Static(path, realPath string) {
+	if !filepath.IsAbs(realPath) {
+		realPath = filepath.Join(env.RootDir(), realPath)
+	}
+	realPath = filepath.Clean(realPath)
+
+	_, err := os.Stat(realPath)
+	if err != nil {
+		panic(fmt.Sprintf("path err %v", err))
+	}
+
+	filepath.Walk(realPath, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(realPath, p)
+		if err != nil {
+			return err
+		}
+		tmpPath := filepath.Join(path, relPath)
+
+		if info.IsDir() {
+			s.StaticDir(tmpPath, p)
+		} else {
+			s.router.Static(tmpPath, &DefaultStaticController{
+				path: p,
+			})
+		}
+
+		return nil
+	})
+}
+
+func ensureTrailingSlash(path string) string {
+	if !strings.HasSuffix(path, "/") {
+		return path + "/"
+	}
+	return path
+}
+
+func (s *Server) StaticDir(path, realPath string) {
+	path = ensureTrailingSlash(path)
+	realPath = ensureTrailingSlash(realPath)
+	s.router.Static(path, &DefaultStaticController{
+		path: realPath,
+	})
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
