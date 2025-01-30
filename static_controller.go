@@ -7,10 +7,10 @@ import (
 
 type DefaultStaticController struct {
 	BaseController
-	path string
+	Path string
 }
 
 func (c *DefaultStaticController) Serve(ctx context.Context) error {
-	http.ServeFile(c.responseWriter, c.request, c.path)
+	http.ServeFile(c.responseWriter, c.request, c.Path)
 	return nil
 }
