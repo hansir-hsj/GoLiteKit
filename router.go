@@ -21,27 +21,27 @@ func NewRouter() Router {
 }
 
 func (r *Router) OnPost(path string, controller Controller) {
-	path = ensureLeadingSlash(path)
+	path = dealSlash(path)
 	r.register(http.MethodPost, path, controller)
 }
 
 func (r *Router) OnGet(path string, controller Controller) {
-	path = ensureLeadingSlash(path)
+	path = dealSlash(path)
 	r.register(http.MethodGet, path, controller)
 }
 
 func (r *Router) OnPut(path string, controller Controller) {
-	path = ensureLeadingSlash(path)
+	path = dealSlash(path)
 	r.register(http.MethodPut, path, controller)
 }
 
 func (r *Router) OnDelete(path string, controller Controller) {
-	path = ensureLeadingSlash(path)
+	path = dealSlash(path)
 	r.register(http.MethodDelete, path, controller)
 }
 
 func (r *Router) Static(path string, controller Controller) {
-	path = ensureLeadingSlash(path)
+	path = dealSlash(path)
 	r.static[path] = controller
 }
 
@@ -59,15 +59,16 @@ func (r *Router) register(method, path string, controller Controller) {
 	}
 }
 
-func ensureLeadingSlash(path string) string {
+func dealSlash(path string) string {
 	if !strings.HasPrefix(path, "/") {
 		return "/" + path
 	}
+	path = strings.TrimRight(path, "/")
 	return path
 }
 
 func (r *Router) Route(method, path string) (Controller, map[string]string, bool) {
-	path = ensureLeadingSlash(path)
+	path = dealSlash(path)
 
 	// match regular routes first
 	if router, ok := r.routers[method]; ok {

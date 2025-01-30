@@ -6,6 +6,7 @@ import (
 	"github/hsj/golite/logger"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 )
@@ -314,20 +315,85 @@ func (c *BaseController) Fatal(ctx context.Context, format string, args ...any) 
 	c.logger.Fatal(ctx, format, args...)
 }
 
-func ControllerAsMiddleware(ctx context.Context, controller Controller, w http.ResponseWriter, req *http.Request) Middleware {
+func controllerAsMiddleware(c Controller) Middleware {
 	return func(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
-		err := controller.Init(ctx)
+		err := c.Init(ctx)
 		if err != nil {
 			return err
 		}
-		err = controller.Serve(ctx)
+		err = c.Serve(ctx)
 		if err != nil {
 			return err
 		}
-		err = controller.Finalize(ctx)
+		err = c.Finalize(ctx)
 		if err != nil {
 			return err
 		}
-		return nil
+		return queue.Next(ctx, w, req)
+	}
+}
+
+func CloneController(src Controller) Controller {
+	srcValue := reflect.ValueOf(src)
+	if srcValue.Kind() == reflect.Ptr {
+		if srcValue.IsNil() {
+			return nil
+		}
+		srcValue = srcValue.Elem()
+	}
+	dstValue := reflect.New(srcValue.Type()).Elem()
+	copyFields(srcValue, dstValue)
+	return dstValue.Addr().Interface().(Controller)
+}
+
+func copyFields(src, dst reflect.Value) {
+	for i := 0; i < src.NumField(); i++ {
+		srcField := src.Field(i)
+		dstField := dst.Field(i)
+		if !dstField.CanSet() {
+			continue
+		}
+		switch srcField.Kind() {
+		case reflect.Struct:
+			copyFields(srcField, dstField)
+		case reflect.Ptr:
+			if srcField.IsNil() {
+				continue
+			}
+			newPtr := reflect.New(srcField.Type().Elem())
+			copyFields(srcField.Elem(), newPtr.Elem())
+			dstField.Set(newPtr)
+		case reflect.Slice:
+			if srcField.IsNil() {
+				continue
+			}
+			dstField.Set(reflect.MakeSlice(srcField.Type(), srcField.Len(), srcField.Cap()))
+			for j := 0; j < srcField.Len(); j++ {
+				copyFields(srcField.Index(j), dstField.Index(j))
+			}
+		case reflect.Map:
+			if srcField.IsNil() {
+				continue
+			}
+			dstField.Set(reflect.MakeMap(srcField.Type()))
+			for _, key := range srcField.MapKeys() {
+				newKey := reflect.New(key.Type()).Elem()
+				copyFields(key, newKey)
+				newValue := reflect.New(srcField.MapIndex(key).Type()).Elem()
+				copyFields(srcField.MapIndex(key), newValue)
+				dstField.SetMapIndex(newKey, newValue)
+			}
+		case reflect.Array:
+			for j := 0; j < srcField.Len(); j++ {
+				copyFields(srcField.Index(j), dstField.Index(j))
+			}
+		case reflect.Chan:
+			if srcField.IsNil() {
+				continue
+			}
+			dstField.Set(srcField)
+		default:
+			dstField.Set(srcField)
+		}
 	}
 }

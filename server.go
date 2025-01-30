@@ -13,10 +13,10 @@ import (
 )
 
 type Server struct {
-	addr            string
-	router          Router
-	middlewareQueue MiddlewareQueue
-	rateLimiter     *RateLimiter
+	addr        string
+	router      Router
+	rateLimiter *RateLimiter
+	mq          MiddlewareQueue
 
 	httpServer http.Server
 	closeChan  chan struct{}
@@ -35,11 +35,10 @@ func New(conf string) *Server {
 	}
 
 	return &Server{
-		addr:            env.Addr(),
-		router:          router,
-		middlewareQueue: NewMiddlewareQueue(),
-		rateLimiter:     rateLimiter,
-		closeChan:       make(chan struct{}),
+		addr:        env.Addr(),
+		router:      router,
+		rateLimiter: rateLimiter,
+		closeChan:   make(chan struct{}),
 	}
 }
 
@@ -51,7 +50,6 @@ func (s *Server) Start() {
 		IdleTimeout:  env.IdleTimeout(),
 		Handler:      s,
 	}
-	s.Use(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware)
 
 	go s.handleSignal()
 
@@ -74,10 +72,6 @@ func (s *Server) handleSignal() {
 	}
 	s.httpServer.Shutdown(context.Background())
 	s.closeChan <- struct{}{}
-}
-
-func (s *Server) Use(middlewares ...Middleware) {
-	s.middlewareQueue = append(s.middlewareQueue, middlewares...)
 }
 
 func (s *Server) OnGet(path string, controller Controller) {
@@ -117,32 +111,22 @@ func (s *Server) Static(path, realPath string) {
 			return err
 		}
 		tmpPath := filepath.Join(path, relPath)
-
 		if info.IsDir() {
-			s.StaticDir(tmpPath, p)
-		} else {
-			s.router.Static(tmpPath, &DefaultStaticController{
-				path: p,
-			})
+			if !strings.HasSuffix(p, "/") {
+				p = p + "/"
+			}
 		}
+
+		s.router.Static(tmpPath, &DefaultStaticController{
+			Path: p,
+		})
 
 		return nil
 	})
 }
 
-func ensureTrailingSlash(path string) string {
-	if !strings.HasSuffix(path, "/") {
-		return path + "/"
-	}
-	return path
-}
-
-func (s *Server) StaticDir(path, realPath string) {
-	path = ensureTrailingSlash(path)
-	realPath = ensureTrailingSlash(realPath)
-	s.router.Static(path, &DefaultStaticController{
-		path: realPath,
-	})
+func (s *Server) UseMiddleware(middleware ...Middleware) {
+	s.mq.Use(middleware...)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -150,8 +134,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
+	s.mq = NewMiddlewareQueue()
+
+	s.mq.Use(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware)
+
 	if s.rateLimiter != nil {
-		s.Use(s.rateLimiter.RateLimiterAsMiddleware(ctx, w, req, s.middlewareQueue))
+		s.mq.Use(s.rateLimiter.RateLimiterAsMiddleware())
 	}
 
 	controller, params, ok := s.router.Route(req.Method, req.URL.Path)
@@ -162,7 +150,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if params != nil {
 		gcx.SetContextOptions(WithRouterParams(params))
 	}
-	s.Use(ControllerAsMiddleware(ctx, controller, w, req))
 
-	s.middlewareQueue.Next(ctx, w, req)
+	cloned := CloneController(controller)
+
+	s.mq.Use(controllerAsMiddleware(cloned))
+
+	s.mq.Next(ctx, w, req)
 }
