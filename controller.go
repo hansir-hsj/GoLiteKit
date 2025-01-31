@@ -3,6 +3,7 @@ package golite
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"github/hsj/golite/logger"
 	"io"
 	"net/http"
@@ -92,8 +93,13 @@ func (c *BaseController) ServeRawData(data any) {
 	c.gcx.ServeRawData(data)
 }
 
-func (c *BaseController) ServeJSON(data any) {
-	c.gcx.ServeJSON(data)
+func (c *BaseController) ServeJSON(data any) error {
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	c.gcx.ServeJSON(jsonData)
+	return nil
 }
 
 func (c *BaseController) QueryInt(key string, def int) int {

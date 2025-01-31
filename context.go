@@ -138,8 +138,8 @@ func (ctx *Context) ServeRawData(data any) {
 	}
 }
 
-func (ctx *Context) ServeJSON(data any) {
+func (ctx *Context) ServeJSON(data []byte) {
 	header := ctx.responseWriter.Header()
 	header.Set("Content-Type", "application/json")
-	ctx.ServeRawData(data)
+	ctx.responseWriter.Write(data)
 }
