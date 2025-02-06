@@ -20,7 +20,7 @@ type Field struct {
 	Next  *Field
 }
 
-type LogContext struct {
+type LoggerContext struct {
 	Head *Field
 }
 
@@ -29,15 +29,27 @@ type ContextHandler struct {
 }
 
 // please call WithContext First
-func WithContext(ctx context.Context) context.Context {
-	ctx = context.WithValue(ctx, loggerKey, &LogContext{})
+func WithLoggerContext(ctx context.Context) context.Context {
+	loggerCtx := GetLoggerContext(ctx)
+	if loggerCtx == nil {
+		loggerCtx = &LoggerContext{}
+		return context.WithValue(ctx, loggerKey, loggerCtx)
+	}
 	return ctx
+}
+
+func GetLoggerContext(ctx context.Context) *LoggerContext {
+	loggerCtx := ctx.Value(loggerKey)
+	if lcx, ok := loggerCtx.(*LoggerContext); ok {
+		return lcx
+	}
+	return nil
 }
 
 // Handle adds contextual attributes to the Record before calling the underlying
 // handler
 func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if logCtx, ok := ctx.Value(loggerKey).(*LogContext); ok {
+	if logCtx, ok := ctx.Value(loggerKey).(*LoggerContext); ok {
 		for node := logCtx.Head; node != nil; node = node.Next {
 			// skip lower level field
 			if node.Level < r.Level {
@@ -64,7 +76,7 @@ func newContextHandler(target io.Writer, format string, opts *slog.HandlerOption
 	}
 }
 
-func (logCtx *LogContext) add(key string, value any, level slog.Level) {
+func (logCtx *LoggerContext) add(key string, value any, level slog.Level) {
 	if logCtx == nil {
 		return
 	}
@@ -116,9 +128,9 @@ func AddFatal(ctx context.Context, key string, value any) {
 
 func addLog(ctx context.Context, level slog.Level, key string, value any) {
 	lcx := ctx.Value(loggerKey)
-	logCtx, ok := lcx.(*LogContext)
+	logCtx, ok := lcx.(*LoggerContext)
 	if !ok {
-		panic("LogContext not init, please call WithContext first")
+		panic("LoggerContext not init, please call WithLoggerContext first")
 	}
 	logCtx.add(key, value, level)
 }

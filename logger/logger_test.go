@@ -6,7 +6,7 @@ import (
 )
 
 func TestLogger(t *testing.T) {
-	ctx := WithContext(context.Background())
+	ctx := WithLoggerContext(context.Background())
 	log, _ := NewLogger(ctx, "logs/logger.toml")
 	log.Debug(ctx, "debug")
 	log.Trace(ctx, "trace")
@@ -28,7 +28,7 @@ func TestStruct(t *testing.T) {
 		Email     string `json:"email"`
 		Password  string `json:"password"`
 	}
-	ctx := WithContext(context.Background())
+	ctx := WithLoggerContext(context.Background())
 	log, _ := NewLogger(ctx, "logs/logger.toml")
 	u := &User{
 		ID:        "user-12234",
@@ -41,13 +41,13 @@ func TestStruct(t *testing.T) {
 }
 
 func TestConsole(t *testing.T) {
-	ctx := WithContext(context.Background())
+	ctx := WithLoggerContext(context.Background())
 	log, _ := NewLogger(ctx)
 	log.Debug(ctx, "debug")
 }
 
 func TestRotate(t *testing.T) {
-	ctx := WithContext(context.Background())
+	ctx := WithLoggerContext(context.Background())
 	log, _ := NewLogger(ctx, "logs/logger.toml")
 	for i := 0; i < 10000; i++ {
 		log.Info(ctx, "info", "times", i)
