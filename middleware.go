@@ -13,9 +13,12 @@ func NewMiddlewareQueue(middlewares ...Middleware) MiddlewareQueue {
 	return middlewares
 }
 
-func (mq *MiddlewareQueue) Use(middlewares ...Middleware) *MiddlewareQueue {
+func (mq MiddlewareQueue) Clone() MiddlewareQueue {
+	return append(MiddlewareQueue{}, mq...)
+}
+
+func (mq *MiddlewareQueue) Use(middlewares ...Middleware) {
 	*mq = append(*mq, middlewares...)
-	return mq
 }
 
 func (mq *MiddlewareQueue) Next(ctx context.Context, w http.ResponseWriter, req *http.Request) error {

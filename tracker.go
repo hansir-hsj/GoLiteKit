@@ -46,9 +46,10 @@ func WithTracker(ctx context.Context) context.Context {
 			startTime: time.Now(),
 			services:  make(map[string]*serviceTracker),
 		}
+		return context.WithValue(ctx, trackerKey, tracker)
 	}
 
-	return context.WithValue(ctx, trackerKey, tracker)
+	return ctx
 }
 
 func (s *serviceTracker) start() {

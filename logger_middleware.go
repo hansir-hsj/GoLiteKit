@@ -8,7 +8,6 @@ import (
 )
 
 func LoggerMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
-	ctx = logger.WithContext(ctx)
 	logInst, err := logger.NewLogger(ctx, env.ConfDir())
 	if err != nil {
 		return err
@@ -24,6 +23,7 @@ func LoggerMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Requ
 
 	err = queue.Next(ctx, w, req)
 	if err != nil {
+		logInst.Warning(ctx, err.Error())
 		return err
 	}
 	logInst.Info(ctx, "ok")

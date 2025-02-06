@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github/hsj/golite/env"
+	"github/hsj/golite/logger"
 	"net/http"
 	"os"
 	"os/signal"
@@ -39,6 +40,7 @@ func New(conf string) *Server {
 		router:      router,
 		rateLimiter: rateLimiter,
 		closeChan:   make(chan struct{}),
+		mq:          NewMiddlewareQueue(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware),
 	}
 }
 
@@ -125,21 +127,16 @@ func (s *Server) Static(path, realPath string) {
 	})
 }
 
-func (s *Server) UseMiddleware(middleware ...Middleware) {
-	s.mq.Use(middleware...)
-}
-
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := WithContext(req.Context())
+	ctx = logger.WithLoggerContext(ctx)
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
-	s.mq = NewMiddlewareQueue()
-
-	s.mq.Use(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware)
+	mq := s.mq.Clone()
 
 	if s.rateLimiter != nil {
-		s.mq.Use(s.rateLimiter.RateLimiterAsMiddleware())
+		mq.Use(s.rateLimiter.RateLimiterAsMiddleware())
 	}
 
 	controller, params, ok := s.router.Route(req.Method, req.URL.Path)
@@ -153,7 +150,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	cloned := CloneController(controller)
 
-	s.mq.Use(controllerAsMiddleware(cloned))
+	mq.Use(controllerAsMiddleware(cloned))
 
-	s.mq.Next(ctx, w, req)
+	mq.Next(ctx, w, req)
 }
