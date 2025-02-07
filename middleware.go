@@ -2,10 +2,9 @@ package golite
 
 import (
 	"context"
-	"net/http"
 )
 
-type Middleware func(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error
+type Middleware func(ctx context.Context, queue MiddlewareQueue) error
 
 type MiddlewareQueue []Middleware
 
@@ -21,11 +20,11 @@ func (mq *MiddlewareQueue) Use(middlewares ...Middleware) {
 	*mq = append(*mq, middlewares...)
 }
 
-func (mq *MiddlewareQueue) Next(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
+func (mq *MiddlewareQueue) Next(ctx context.Context) error {
 	if len(*mq) == 0 {
 		return nil
 	}
 	handler := (*mq)[0]
 	*mq = (*mq)[1:]
-	return handler(ctx, w, req, *mq)
+	return handler(ctx, *mq)
 }

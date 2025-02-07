@@ -4,10 +4,9 @@ import (
 	"context"
 	"github/hsj/golite/env"
 	"github/hsj/golite/logger"
-	"net/http"
 )
 
-func LoggerMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
+func LoggerMiddleware(ctx context.Context, queue MiddlewareQueue) error {
 	logInst, err := logger.NewLogger(ctx, env.ConfDir())
 	if err != nil {
 		return err
@@ -21,7 +20,7 @@ func LoggerMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Requ
 	logger.AddInfo(ctx, "method", gcx.request.Method)
 	logger.AddInfo(ctx, "url", gcx.request.URL)
 
-	err = queue.Next(ctx, w, req)
+	err = queue.Next(ctx)
 	if err != nil {
 		logInst.Warning(ctx, err.Error())
 		return err

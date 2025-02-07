@@ -2,18 +2,24 @@ package golite
 
 import (
 	"context"
+	"fmt"
 	"github/hsj/golite/env"
 	"log"
-	"net/http"
 )
 
-func TimeoutMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
+func TimeoutMiddleware(ctx context.Context, queue MiddlewareQueue) error {
 	timeout := env.WriteTimeout() - env.ReadTimeout()
+	if timeout < 1 {
+		return queue.Next(ctx)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	doneChan := make(chan struct{}, 1)
+	doneChan := make(chan struct{})
 	panicChan := make(chan any, 1)
+	defer close(doneChan)
+	defer close(panicChan)
 
 	go func() {
 		defer func() {
@@ -24,7 +30,21 @@ func TimeoutMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Req
 			}
 		}()
 
-		queue.Next(ctx, w, req)
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			err := queue.Next(ctx)
+			if err != nil {
+				log.Printf("%v", err)
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 
 		doneChan <- struct{}{}
 	}()
@@ -32,10 +52,11 @@ func TimeoutMiddleware(ctx context.Context, w http.ResponseWriter, req *http.Req
 	select {
 	case p := <-panicChan:
 		log.Printf("%v", p)
+		return fmt.Errorf("panic: %v", p)
 	case <-ctx.Done():
 		log.Print("timeout")
+		return fmt.Errorf("timeout")
 	case <-doneChan:
+		return nil
 	}
-
-	return nil
 }

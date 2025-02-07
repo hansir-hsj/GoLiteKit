@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"github/hsj/golite/logger"
-	"net/http"
 
 	"golang.org/x/time/rate"
 )
@@ -24,11 +23,11 @@ func NewRateLimiter(limit, burst int) *RateLimiter {
 }
 
 func (r *RateLimiter) RateLimiterAsMiddleware() Middleware {
-	return func(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
+	return func(ctx context.Context, queue MiddlewareQueue) error {
 		if !r.limiter.Allow() {
 			logger.AddInfo(ctx, "rate_limited", 1)
 			return ErrRateLimited
 		}
-		return queue.Next(ctx, w, req)
+		return queue.Next(ctx)
 	}
 }
