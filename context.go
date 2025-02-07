@@ -2,6 +2,7 @@ package golite
 
 import (
 	"context"
+	"encoding/json"
 	"github/hsj/golite/logger"
 	"log"
 	"net/http"
@@ -22,6 +23,9 @@ type Context struct {
 	routerParams   map[string]string
 	logger         logger.Logger
 	panicLogger    *logger.PanicLogger
+
+	rawResponse  any
+	jsonResponse any
 
 	data     map[string]any
 	dataLock sync.Mutex
@@ -125,21 +129,51 @@ func (ctx *Context) PanicLogger() *logger.PanicLogger {
 }
 
 func (ctx *Context) ServeRawData(data any) {
-	header := ctx.responseWriter.Header()
-	switch body := data.(type) {
-	case []byte:
-		header.Set("Content-Type", "application/octet-stream")
-		ctx.responseWriter.Write(body)
-	case string:
-		header.Set("Content-Type", "text/plain; charset=UTF-8")
-		ctx.responseWriter.Write([]byte(body))
-	default:
-		log.Printf("unsupported response data type： %T", data)
-	}
+	ctx.rawResponse = data
 }
 
-func (ctx *Context) ServeJSON(data []byte) {
-	header := ctx.responseWriter.Header()
-	header.Set("Content-Type", "application/json")
-	ctx.responseWriter.Write(data)
+func (ctx *Context) ServeJSON(data any) {
+	ctx.jsonResponse = data
+}
+
+func ContextAsMiddleware() Middleware {
+	return func(ctx context.Context, queue MiddlewareQueue) error {
+		err := queue.Next(ctx)
+		if err != nil {
+			return err
+		}
+
+		gcx := GetContext(ctx)
+		if gcx == nil {
+			return nil
+		}
+
+		w := gcx.ResponseWriter()
+
+		if gcx.jsonResponse != nil {
+			w.Header().Set("Content-Type", "application/json")
+			if bytes, ok := gcx.jsonResponse.([]byte); ok {
+				w.Write(bytes)
+			} else {
+				jsonData, err := json.Marshal(gcx.jsonResponse)
+				if err != nil {
+					return err
+				}
+				w.Write(jsonData)
+			}
+		} else if gcx.rawResponse != nil {
+			switch body := gcx.rawResponse.(type) {
+			case []byte:
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Write(body)
+			case string:
+				w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+				w.Write([]byte(body))
+			default:
+				log.Printf("unsupported response data type： %T", gcx.rawResponse)
+			}
+		}
+
+		return nil
+	}
 }

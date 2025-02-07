@@ -5,12 +5,12 @@ import (
 	"net/http"
 )
 
-type DefaultStaticController struct {
+type StaticController struct {
 	BaseController
 	Path string
 }
 
-func (c *DefaultStaticController) Serve(ctx context.Context) error {
+func (c *StaticController) Serve(ctx context.Context) error {
 	http.ServeFile(c.responseWriter, c.request, c.Path)
 	return nil
 }

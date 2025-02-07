@@ -35,12 +35,14 @@ func New(conf string) *Server {
 		rateLimiter = NewRateLimiter(env.RateLimit(), env.RateBurst())
 	}
 
+	mq := NewMiddlewareQueue(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware, ContextAsMiddleware())
+
 	return &Server{
 		addr:        env.Addr(),
 		router:      router,
 		rateLimiter: rateLimiter,
 		closeChan:   make(chan struct{}),
-		mq:          NewMiddlewareQueue(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware),
+		mq:          mq,
 	}
 }
 
@@ -119,7 +121,7 @@ func (s *Server) Static(path, realPath string) {
 			}
 		}
 
-		s.router.Static(tmpPath, &DefaultStaticController{
+		s.router.Static(tmpPath, &StaticController{
 			Path: p,
 		})
 
@@ -152,5 +154,5 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	mq.Use(controllerAsMiddleware(cloned))
 
-	mq.Next(ctx, w, req)
+	mq.Next(ctx)
 }

@@ -23,10 +23,6 @@ type Controller interface {
 	Finalize(ctx context.Context) error
 }
 
-type StaticController interface {
-	SetPath(ctx context.Context, path string)
-}
-
 type BaseController struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
@@ -322,7 +318,7 @@ func (c *BaseController) Fatal(ctx context.Context, format string, args ...any) 
 }
 
 func controllerAsMiddleware(c Controller) Middleware {
-	return func(ctx context.Context, w http.ResponseWriter, req *http.Request, queue MiddlewareQueue) error {
+	return func(ctx context.Context, queue MiddlewareQueue) error {
 		err := c.Init(ctx)
 		if err != nil {
 			return err
@@ -335,7 +331,7 @@ func controllerAsMiddleware(c Controller) Middleware {
 		if err != nil {
 			return err
 		}
-		return queue.Next(ctx, w, req)
+		return queue.Next(ctx)
 	}
 }
 
