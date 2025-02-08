@@ -35,7 +35,7 @@ func New(conf string) *Server {
 		rateLimiter = NewRateLimiter(env.RateLimit(), env.RateBurst())
 	}
 
-	mq := NewMiddlewareQueue(LoggerMiddleware, TrackerMiddleware, TimeoutMiddleware, ContextAsMiddleware())
+	mq := NewMiddlewareQueue(LoggerMiddleware, TrackerMiddleware, ContextAsMiddleware(), TimeoutMiddleware)
 
 	return &Server{
 		addr:        env.Addr(),

@@ -24,9 +24,8 @@ type Controller interface {
 }
 
 type BaseController struct {
-	request        *http.Request
-	responseWriter http.ResponseWriter
-	logger         logger.Logger
+	request *http.Request
+	logger  logger.Logger
 
 	rawBody []byte
 
@@ -40,7 +39,6 @@ func (c *BaseController) MaxMemorySize() int64 {
 func (c *BaseController) Init(ctx context.Context) error {
 	c.gcx = GetContext(ctx)
 	c.request = c.gcx.Request()
-	c.responseWriter = c.gcx.ResponseWriter()
 	c.logger = c.gcx.logger
 	c.parseBody()
 
