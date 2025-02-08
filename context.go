@@ -164,6 +164,13 @@ func ContextAsMiddleware() Middleware {
 			return err
 		}
 
+		if err := ctx.Err(); err != nil {
+			if err == context.Canceled {
+				return nil
+			}
+			return err
+		}
+
 		gcx := GetContext(ctx)
 		if gcx == nil {
 			return nil
@@ -202,10 +209,6 @@ func ContextAsMiddleware() Middleware {
 			}
 			w.Header().Set("Content-Length", strconv.FormatInt(int64(len(gcx.rawFile)), 10))
 			w.Write(gcx.rawFile)
-		}
-
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
 		}
 
 		return nil

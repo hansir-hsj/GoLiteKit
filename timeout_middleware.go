@@ -26,6 +26,11 @@ func TimeoutMiddleware(ctx context.Context, queue MiddlewareQueue) error {
 			if p := recover(); p != nil {
 				gcx := GetContext(ctx)
 				gcx.PanicLogger().Report(ctx, p)
+				if err := ctx.Err(); err != nil {
+					if err != context.Canceled {
+						return
+					}
+				}
 				panicChan <- p
 			}
 		}()
