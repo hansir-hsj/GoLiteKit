@@ -16,7 +16,7 @@ func TimeoutMiddleware(ctx context.Context, queue MiddlewareQueue) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	doneChan := make(chan struct{})
+	doneChan := make(chan struct{}, 1)
 	panicChan := make(chan any, 1)
 	defer close(doneChan)
 	defer close(panicChan)
