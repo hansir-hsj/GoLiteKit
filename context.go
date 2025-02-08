@@ -6,12 +6,21 @@ import (
 	"github/hsj/golite/logger"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 )
 
 const (
 	globalContextKey ContextKey = iota
 )
+
+var extensionToContentType = map[string]string{
+	".html": "text/html; charset=utf-8",
+	".css":  "text/css; charset=utf-8",
+	".js":   "application/javascript",
+	".xml":  "text/xml; charset=utf-8",
+	".jpg":  "image/jpeg",
+}
 
 type ContextKey int
 
@@ -26,6 +35,9 @@ type Context struct {
 
 	rawResponse  any
 	jsonResponse any
+	rawFile      []byte
+	rawExt       string
+	rawHtml      string
 
 	data     map[string]any
 	dataLock sync.Mutex
@@ -136,6 +148,15 @@ func (ctx *Context) ServeJSON(data any) {
 	ctx.jsonResponse = data
 }
 
+func (ctx *Context) ServeHTML(html string) {
+	ctx.rawHtml = html
+}
+
+func (ctx *Context) ServeFile(ext string, file []byte) {
+	ctx.rawExt = ext
+	ctx.rawFile = file
+}
+
 func ContextAsMiddleware() Middleware {
 	return func(ctx context.Context, queue MiddlewareQueue) error {
 		err := queue.Next(ctx)
@@ -172,6 +193,19 @@ func ContextAsMiddleware() Middleware {
 			default:
 				log.Printf("unsupported response data type： %T", gcx.rawResponse)
 			}
+		} else if gcx.rawHtml != "" {
+			w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+			w.Write([]byte(gcx.rawHtml))
+		} else if gcx.rawFile != nil && gcx.rawExt != "" {
+			if contentType := extensionToContentType[gcx.rawExt]; contentType != "" {
+				w.Header().Set("Content-Type", contentType)
+			}
+			w.Header().Set("Content-Length", strconv.FormatInt(int64(len(gcx.rawFile)), 10))
+			w.Write(gcx.rawFile)
+		}
+
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
 		}
 
 		return nil

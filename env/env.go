@@ -3,6 +3,7 @@ package env
 import (
 	"github/hsj/golite/config"
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -30,7 +31,7 @@ func Init(path string) error {
 		return err
 	}
 	defaultEnv.RootDir = curPath
-	defaultEnv.ConfDir = curPath + "/conf"
+	defaultEnv.ConfDir = filepath.Join(curPath, "conf")
 	err = config.Parse(path, defaultEnv)
 	if err != nil {
 		return err
