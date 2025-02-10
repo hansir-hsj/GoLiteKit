@@ -1,6 +1,6 @@
 # golite
 
-[英文](readme.md) [中文](readme.zh.md)
+[en](readme.md) [zh](readme.zh.md)
 
 A concise and lightweight Go language framework for rapid development of web applications.
 
@@ -18,3 +18,4 @@ A concise and lightweight Go language framework for rapid development of web app
     - Request tracking middleware
     - Rate - limiting middleware based on `golang.org/x/time/rate`
 6. Support static file serving
+7. Integrate GORM framework
