@@ -1,0 +1,17 @@
+# Data Source Name
+dsn = "xx"
+username = "xx"
+password = "xx"
+protocol = "tcp"
+host = ""
+port = 3306
+database = "xx"
+parseTime = true
+timeout = 1500
+readTimeout = 1500
+writeTimeout = 1500
+
+maxOpenConns = 10
+maxIdleConns = 5
+# 单位秒
+connMaxLifetime = 600
