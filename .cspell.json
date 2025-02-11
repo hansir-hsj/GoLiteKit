@@ -2,6 +2,18 @@
     "version": "0.2",
     "words": [
         "golite",
-        "gorm"
+        "gorm",
+        "webp",
+        "msword",
+        "openxmlformats",
+        "officedocument",
+        "wordprocessingml",
+        "document",
+        "spreadsheetml",
+        "presentationml",
+        "fontobject",
+        "weba",
+        "webm",
+        "flac",
     ]
 }
