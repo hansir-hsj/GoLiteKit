@@ -55,6 +55,10 @@ func (s *Server) Start() {
 		Handler:      s,
 	}
 
+	if env.ReadHeaderTimeout() > 0 {
+		s.httpServer.ReadHeaderTimeout = env.ReadHeaderTimeout()
+	}
+
 	go s.handleSignal()
 
 	err := s.httpServer.ListenAndServe()
