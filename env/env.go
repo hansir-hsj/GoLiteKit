@@ -18,6 +18,7 @@ type Env struct {
 	ReadHeaderTimeout int `toml:"readHeaderTimeout"`
 	WriteTimeout      int `toml:"writeTimeout"`
 	IdleTimeout       int `toml:"idleTimeout"`
+	ShutdownTimeout   int `toml:"shutdownTimeout"`
 
 	RateLimit int `toml:"rateLimit"`
 	RateBurst int `toml:"rateBurst"`
@@ -62,19 +63,38 @@ func ConfDir() string {
 }
 
 func ReadTimeout() time.Duration {
+	if defaultEnv.ReadTimeout == 0 {
+		return 200 * time.Millisecond
+	}
 	return time.Duration(defaultEnv.ReadTimeout) * time.Millisecond
 }
 
 func ReadHeaderTimeout() time.Duration {
+	if defaultEnv.ReadHeaderTimeout == 0 {
+		return 100 * time.Millisecond
+	}
 	return time.Duration(defaultEnv.ReadHeaderTimeout) * time.Millisecond
 }
 
 func WriteTimeout() time.Duration {
+	if defaultEnv.WriteTimeout == 0 {
+		return 500 * time.Millisecond
+	}
 	return time.Duration(defaultEnv.WriteTimeout) * time.Millisecond
 }
 
 func IdleTimeout() time.Duration {
+	if defaultEnv.IdleTimeout == 0 {
+		return 2 * time.Second
+	}
 	return time.Duration(defaultEnv.IdleTimeout) * time.Millisecond
+}
+
+func ShutdownTimeout() time.Duration {
+	if defaultEnv.ShutdownTimeout == 0 {
+		return 2 * time.Second
+	}
+	return time.Duration(defaultEnv.ShutdownTimeout) * time.Millisecond
 }
 
 func RateLimit() int {

@@ -78,7 +78,10 @@ func (s *Server) handleSignal() {
 	case syscall.SIGTERM:
 		fmt.Println("server shutdown by SIGTERM")
 	}
-	s.httpServer.Shutdown(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), env.ShutdownTimeout())
+	defer cancel()
+
+	s.httpServer.Shutdown(ctx)
 	s.closeChan <- struct{}{}
 }
 
