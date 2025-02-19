@@ -1,2 +1,11 @@
-appName = "go-lite"
+appName = "golite"
 runMode = "debug"
+addr = ":8080"
+logger = "logger.toml"
+
+writeTimeout = 15000
+readTimeout = 200
+idleTimeout = 5000
+shutdownTimeout = 5000
+
+rateLimit = 100

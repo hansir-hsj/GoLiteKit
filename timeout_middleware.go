@@ -8,7 +8,7 @@ import (
 )
 
 func TimeoutMiddleware(ctx context.Context, queue MiddlewareQueue) error {
-	timeout := env.WriteTimeout() - env.ReadTimeout()
+	timeout := env.WriteTimeout()
 	if timeout < 1 {
 		return queue.Next(ctx)
 	}
