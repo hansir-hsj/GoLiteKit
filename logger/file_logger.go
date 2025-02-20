@@ -33,7 +33,7 @@ func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOp
 	if err != nil {
 		return nil, err
 	}
-	filePath := fmt.Sprintf("%s/%s", logConf.Dir, logConf.FileName)
+	filePath := logConf.LogFileName()
 	target, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 	if err != nil {
 		return nil, err

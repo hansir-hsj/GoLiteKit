@@ -15,22 +15,21 @@ type PanicLogger struct {
 	file     *os.File
 }
 
-func NewPanicLogger(ctx context.Context, confDir ...string) (*PanicLogger, error) {
+func NewPanicLogger(ctx context.Context, loggerConfig ...string) (*PanicLogger, error) {
 	var filePath string
 
-	if len(confDir) == 0 {
+	if len(loggerConfig) == 0 {
 		dir, err := os.Getwd()
 		if err != nil {
 			return nil, err
 		}
 		filePath = filepath.Join(dir, "/log/panic.log")
 	} else {
-		loggerConfig := filepath.Join(confDir[0], LoggerConfigFile)
-		logConf, err := parse(loggerConfig)
+		logConf, err := parse(loggerConfig[0])
 		if err != nil {
 			return nil, err
 		}
-		filePath = filepath.Join(logConf.Dir, "panic.log")
+		filePath = logConf.PanicFileName()
 	}
 
 	target, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
