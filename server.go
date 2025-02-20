@@ -63,7 +63,13 @@ func (s *Server) Start() {
 
 	go s.handleSignal()
 
-	err := s.httpServer.ListenAndServe()
+	var err error
+	if env.TLSCertFile() != "" && env.TLSKeyFile() != "" {
+		s.httpServer.ListenAndServeTLS(env.TLSCertFile(), env.TLSKeyFile())
+	} else {
+		err = s.httpServer.ListenAndServe()
+	}
+
 	if err != nil && err != http.ErrServerClosed {
 		fmt.Printf("server start error: %v", err)
 	}
