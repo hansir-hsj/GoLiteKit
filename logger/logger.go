@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github/hsj/golite/config"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -13,6 +12,8 @@ import (
 
 const (
 	LoggerConfigFile = "logger.toml"
+	LoggerTextFormat = "text"
+	LoggerJSONFormat = "json"
 )
 
 const (
@@ -85,7 +86,18 @@ func parse(conf string) (*LogConfig, error) {
 	return &logConfig, nil
 }
 
-func NewLogger(ctx context.Context, confDir ...string) (Logger, error) {
+func (c *LogConfig) LogFileName() string {
+	if c.FileName == "" {
+		c.FileName = "app.log"
+	}
+	return filepath.Join(c.Dir, c.FileName)
+}
+
+func (c *LogConfig) PanicFileName() string {
+	return filepath.Join(c.Dir, "panic.log")
+}
+
+func NewLogger(ctx context.Context, loggerConfig ...string) (Logger, error) {
 	opts := &slog.HandlerOptions{
 		Level:     LevelDebug,
 		AddSource: true,
@@ -103,17 +115,11 @@ func NewLogger(ctx context.Context, confDir ...string) (Logger, error) {
 		},
 	}
 
-	if len(confDir) == 0 {
-		dir, err := os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-		return NewConsoleLogger(ctx, &LogConfig{Dir: dir, MinLevel: "debug", Format: "text"}, opts)
+	if len(loggerConfig) == 0 {
+		return NewConsoleLogger(ctx, opts)
 	}
 
-	loggerConfig := filepath.Join(confDir[0], LoggerConfigFile)
-
-	logConf, err := parse(loggerConfig)
+	logConf, err := parse(loggerConfig[0])
 	if err != nil {
 		return nil, err
 	}
@@ -128,5 +134,5 @@ func NewLogger(ctx context.Context, confDir ...string) (Logger, error) {
 		return NewTextLogger(ctx, logConf, opts)
 	}
 
-	return NewConsoleLogger(ctx, logConf, opts)
+	return NewConsoleLogger(ctx, opts)
 }

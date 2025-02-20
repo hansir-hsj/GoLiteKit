@@ -7,11 +7,11 @@ import (
 )
 
 func LoggerMiddleware(ctx context.Context, queue MiddlewareQueue) error {
-	logInst, err := logger.NewLogger(ctx, env.ConfDir())
+	logInst, err := logger.NewLogger(ctx, env.LoggerConfigFile())
 	if err != nil {
 		return err
 	}
-	panicLogInst, err := logger.NewPanicLogger(ctx, env.ConfDir())
+	panicLogInst, err := logger.NewPanicLogger(ctx, env.LoggerConfigFile())
 	if err != nil {
 		return err
 	}

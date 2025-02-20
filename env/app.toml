@@ -1,11 +1,23 @@
+[HttpServer]
 appName = "golite"
 runMode = "debug"
 addr = ":8080"
-logger = "logger.toml"
 
 writeTimeout = 15000
 readTimeout = 200
 idleTimeout = 5000
 shutdownTimeout = 5000
 
+[HttpServer.RateLimit]
 rateLimit = 100
+rateBurst = 150
+
+[HttpServer.Logger]
+configFile = "logger.toml"
+
+[HttpServer.DB]
+configFile = "db.toml"
+
+[HttpServer.TLSConfig]
+certFile = "tls/server.crt"
+keyFile = "tls/server.key"

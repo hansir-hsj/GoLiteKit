@@ -27,6 +27,7 @@ func New(conf string) *Server {
 	router := NewRouter()
 
 	if err := env.Init(conf); err != nil {
+		fmt.Fprintf(os.Stderr, "env init error: %v", err)
 		return nil
 	}
 

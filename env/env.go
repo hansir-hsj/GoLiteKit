@@ -9,7 +9,7 @@ import (
 
 var defaultEnv = &Env{}
 
-type Env struct {
+type EnvHttpServer struct {
 	AppName string `toml:"appName"`
 	RunMode string `toml:"runMode"`
 	Addr    string `toml:"addr"`
@@ -22,11 +22,35 @@ type Env struct {
 
 	MaxHeaderBytes int `toml:"maxHeaderBytes"`
 
+	EnvRateLimit `toml:"RateLimit"`
+	EnvLogger    `toml:"Logger"`
+	EnvDB        `toml:"DB"`
+	EnvTLSConfig `toml:"TLSConfig"`
+}
+
+type EnvRateLimit struct {
 	RateLimit int `toml:"rateLimit"`
 	RateBurst int `toml:"rateBurst"`
+}
 
+type EnvLogger struct {
+	Logger string `toml:"configFile"`
+}
+
+type EnvDB struct {
+	DB string `toml:"configFile"`
+}
+
+type EnvTLSConfig struct {
+	CertFile string `toml:"certFile"`
+	KeyFile  string `toml:"keyFile"`
+}
+
+type Env struct {
 	RootDir string
 	ConfDir string
+
+	EnvHttpServer `toml:"HttpServer"`
 }
 
 func Init(path string) error {
@@ -115,4 +139,20 @@ func RateBurst() int {
 		return defaultEnv.RateLimit
 	}
 	return defaultEnv.RateBurst
+}
+
+func DBConfigFile() string {
+	return filepath.Join(ConfDir(), defaultEnv.DB)
+}
+
+func LoggerConfigFile() string {
+	return filepath.Join(ConfDir(), defaultEnv.Logger)
+}
+
+func TLSCertFile() string {
+	return filepath.Join(ConfDir(), defaultEnv.CertFile)
+}
+
+func TLSKeyFile() string {
+	return filepath.Join(ConfDir(), defaultEnv.KeyFile)
 }
