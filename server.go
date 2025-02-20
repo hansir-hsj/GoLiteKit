@@ -48,11 +48,12 @@ func New(conf string) *Server {
 
 func (s *Server) Start() {
 	s.httpServer = http.Server{
-		Addr:         s.addr,
-		ReadTimeout:  env.ReadTimeout(),
-		WriteTimeout: env.WriteTimeout(),
-		IdleTimeout:  env.IdleTimeout(),
-		Handler:      s,
+		Addr:           s.addr,
+		ReadTimeout:    env.ReadTimeout(),
+		WriteTimeout:   env.WriteTimeout(),
+		IdleTimeout:    env.IdleTimeout(),
+		MaxHeaderBytes: env.MaxHeaderBytes(),
+		Handler:        s,
 	}
 
 	if env.ReadHeaderTimeout() > 0 {

@@ -20,6 +20,8 @@ type Env struct {
 	IdleTimeout       int `toml:"idleTimeout"`
 	ShutdownTimeout   int `toml:"shutdownTimeout"`
 
+	MaxHeaderBytes int `toml:"maxHeaderBytes"`
+
 	RateLimit int `toml:"rateLimit"`
 	RateBurst int `toml:"rateBurst"`
 
@@ -95,6 +97,13 @@ func ShutdownTimeout() time.Duration {
 		return 2 * time.Second
 	}
 	return time.Duration(defaultEnv.ShutdownTimeout) * time.Millisecond
+}
+
+func MaxHeaderBytes() int {
+	if defaultEnv.MaxHeaderBytes == 0 {
+		return 1 << 20
+	}
+	return defaultEnv.MaxHeaderBytes
 }
 
 func RateLimit() int {
