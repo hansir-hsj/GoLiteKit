@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"github/hsj/golite/logger"
 	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -14,10 +16,12 @@ import (
 
 type RequestSizeLimiter interface {
 	MaxMemorySize() int64
+	MaxBodySize() int64
 }
 
 type Controller interface {
-	MaxMemorySize() int64
+	RequestSizeLimiter
+
 	Init(ctx context.Context) error
 	Serve(ctx context.Context) error
 	Finalize(ctx context.Context) error
@@ -33,6 +37,10 @@ type BaseController struct {
 }
 
 func (c *BaseController) MaxMemorySize() int64 {
+	return 10 << 20
+}
+
+func (c *BaseController) MaxBodySize() int64 {
 	return 10 << 20
 }
 
@@ -58,6 +66,13 @@ func (c *BaseController) parseBody() error {
 	if maxMemorySize <= 0 {
 		maxMemorySize = 10 << 20 // 10M
 	}
+	maxBodySize := c.MaxBodySize()
+	if maxBodySize <= 0 {
+		maxBodySize = 10 << 20 // 10M
+	}
+
+	httpReq := c.request
+	httpReq.Body = http.MaxBytesReader(c.gcx.responseWriter, c.request.Body, maxBodySize)
 
 	var err error
 	ct := c.request.Header.Get("Content-Type")
@@ -68,15 +83,15 @@ func (c *BaseController) parseBody() error {
 	case "multipart/form-data":
 		err = c.request.ParseMultipartForm(maxMemorySize)
 	default:
-		if c.request.Body != nil {
-			originBody := c.request.Body
+		if httpReq.Body != nil {
+			originBody := httpReq.Body
 			// capable of reading data multiple times
 			c.rawBody, err = io.ReadAll(originBody)
 			if err != nil {
 				return err
 			}
 			defer originBody.Close()
-			c.request.Body = io.NopCloser(bytes.NewBuffer(c.rawBody))
+			httpReq.Body = io.NopCloser(bytes.NewBuffer(c.rawBody))
 		}
 	}
 
@@ -152,19 +167,27 @@ func (c *BaseController) QueryBool(key string, def bool) bool {
 	return def
 }
 
-func (c *BaseController) forms() map[string][]string {
+func (c *BaseController) forms() (map[string][]string, error) {
 	ct := c.request.Header.Get("Content-Type")
+	ct, _, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return nil, err
+	}
+
 	switch ct {
 	case "application/x-www-form-urlencoded":
-		return c.request.Form
+		return c.request.Form, nil
 	case "multipart/form-data":
-		return c.request.PostForm
+		return c.request.PostForm, nil
 	}
-	return nil
+	return nil, nil
 }
 
 func (c *BaseController) FormString(key string, def string) string {
-	params := c.forms()
+	params, err := c.forms()
+	if err != nil {
+		return def
+	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		return vals[0]
 	}
@@ -172,7 +195,10 @@ func (c *BaseController) FormString(key string, def string) string {
 }
 
 func (c *BaseController) FormInt(key string, def int) int {
-	params := c.forms()
+	params, err := c.forms()
+	if err != nil {
+		return def
+	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		if ival, err := strconv.Atoi(vals[0]); err == nil {
 			return ival
@@ -182,7 +208,10 @@ func (c *BaseController) FormInt(key string, def int) int {
 }
 
 func (c *BaseController) FormInt64(key string, def int64) int64 {
-	params := c.forms()
+	params, err := c.forms()
+	if err != nil {
+		return def
+	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		if ival, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
 			return ival
@@ -192,7 +221,10 @@ func (c *BaseController) FormInt64(key string, def int64) int64 {
 }
 
 func (c *BaseController) FormFloat32(key string, def float32) float32 {
-	params := c.forms()
+	params, err := c.forms()
+	if err != nil {
+		return def
+	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		if fval, err := strconv.ParseFloat(vals[0], 32); err == nil {
 			return float32(fval)
@@ -202,7 +234,10 @@ func (c *BaseController) FormFloat32(key string, def float32) float32 {
 }
 
 func (c *BaseController) FormFloat64(key string, def float64) float64 {
-	params := c.forms()
+	params, err := c.forms()
+	if err != nil {
+		return def
+	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		if fval, err := strconv.ParseFloat(vals[0], 64); err == nil {
 			return fval
@@ -212,11 +247,18 @@ func (c *BaseController) FormFloat64(key string, def float64) float64 {
 }
 
 func (c *BaseController) FormBool(key string, def bool) bool {
-	params := c.forms()
+	params, err := c.forms()
+	if err != nil {
+		return def
+	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		return vals[0] == "1" || strings.ToLower(vals[0]) == "true"
 	}
 	return def
+}
+
+func (c *BaseController) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
+	return c.request.FormFile(key)
 }
 
 func (c *BaseController) RouterParamString(key string, def string) string {
