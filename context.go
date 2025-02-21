@@ -1,9 +1,9 @@
-package golite
+package golitekit
 
 import (
 	"context"
 	"encoding/json"
-	"github/hsj/golite/logger"
+	"github/hsj/GoLiteKit/logger"
 	"log"
 	"net/http"
 	"strconv"

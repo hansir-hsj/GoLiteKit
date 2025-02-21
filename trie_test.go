@@ -1,4 +1,4 @@
-package golite
+package golitekit
 
 import (
 	"testing"

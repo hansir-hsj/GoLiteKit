@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github/hsj/golite/config/test_data"
+	"github/hsj/GoLiteKit/config/test_data"
 	"testing"
 )
 

@@ -1,9 +1,9 @@
-package golite
+package golitekit
 
 import (
 	"context"
 	"fmt"
-	"github/hsj/golite/env"
+	"github/hsj/GoLiteKit/env"
 	"log"
 )
 

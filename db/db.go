@@ -2,8 +2,8 @@ package db
 
 import (
 	"fmt"
-	"github/hsj/golite/config"
-	"github/hsj/golite/env"
+	"github/hsj/GoLiteKit/config"
+	"github/hsj/GoLiteKit/env"
 	"log"
 	"path/filepath"
 	"time"
