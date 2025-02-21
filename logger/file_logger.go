@@ -28,7 +28,7 @@ type FileLogger struct {
 	mu sync.Mutex
 }
 
-func NewTextLogger(ctx context.Context, logConf *LogConfig, opts *slog.HandlerOptions) (*FileLogger, error) {
+func NewTextLogger(logConf *LogConfig, opts *slog.HandlerOptions) (*FileLogger, error) {
 	err := os.MkdirAll(logConf.Dir, 0755)
 	if err != nil {
 		return nil, err

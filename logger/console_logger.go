@@ -36,7 +36,7 @@ func (l *ConsoleLogger) logit(ctx context.Context, level slog.Level, format stri
 	l.log(ctx, slog.Level(level), format, args...)
 }
 
-func NewConsoleLogger(ctx context.Context, opts *slog.HandlerOptions) (*ConsoleLogger, error) {
+func NewConsoleLogger(opts *slog.HandlerOptions) (*ConsoleLogger, error) {
 	handler := newContextHandler(os.Stdout, LoggerTextFormat, opts)
 
 	return &ConsoleLogger{
