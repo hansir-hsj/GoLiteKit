@@ -1,9 +1,9 @@
-package golite
+package golitekit
 
 import (
 	"context"
 	"errors"
-	"github/hsj/golite/logger"
+	"github/hsj/GoLiteKit/logger"
 
 	"golang.org/x/time/rate"
 )

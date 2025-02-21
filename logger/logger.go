@@ -3,7 +3,7 @@ package logger
 import (
 	"context"
 	"fmt"
-	"github/hsj/golite/config"
+	"github/hsj/GoLiteKit/config"
 	"log/slog"
 	"path/filepath"
 	"strings"

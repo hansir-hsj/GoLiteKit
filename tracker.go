@@ -1,8 +1,8 @@
-package golite
+package golitekit
 
 import (
 	"context"
-	"github/hsj/golite/logger"
+	"github/hsj/GoLiteKit/logger"
 	"time"
 )
 

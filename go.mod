@@ -1,4 +1,4 @@
-module github/hsj/golite
+module github/hsj/GoLiteKit
 
 go 1.22.4
 

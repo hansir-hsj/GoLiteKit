@@ -1,10 +1,10 @@
-package golite
+package golitekit
 
 import (
 	"context"
 	"fmt"
-	"github/hsj/golite/env"
-	"github/hsj/golite/logger"
+	"github/hsj/GoLiteKit/env"
+	"github/hsj/GoLiteKit/logger"
 	"net/http"
 	"os"
 	"os/signal"

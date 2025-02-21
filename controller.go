@@ -1,10 +1,10 @@
-package golite
+package golitekit
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github/hsj/golite/logger"
+	"github/hsj/GoLiteKit/logger"
 	"io"
 	"mime"
 	"mime/multipart"

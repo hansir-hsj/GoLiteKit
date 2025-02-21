@@ -1,7 +1,7 @@
 package env
 
 import (
-	"github/hsj/golite/config"
+	"github/hsj/GoLiteKit/config"
 	"os"
 	"path/filepath"
 	"time"
