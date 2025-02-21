@@ -1,4 +1,4 @@
-# golite
+# GoLiteKit
 
 [en](readme.md) [zh](readme.zh.md)
 
