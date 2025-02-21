@@ -15,7 +15,7 @@ type PanicLogger struct {
 	file     *os.File
 }
 
-func NewPanicLogger(ctx context.Context, loggerConfig ...string) (*PanicLogger, error) {
+func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 	var filePath string
 
 	if len(loggerConfig) == 0 {

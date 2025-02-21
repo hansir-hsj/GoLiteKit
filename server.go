@@ -21,6 +21,9 @@ type Server struct {
 
 	httpServer http.Server
 	closeChan  chan struct{}
+
+	logger      logger.Logger
+	panicLogger *logger.PanicLogger
 }
 
 func New(conf string) *Server {
@@ -36,7 +39,18 @@ func New(conf string) *Server {
 		rateLimiter = NewRateLimiter(env.RateLimit(), env.RateBurst())
 	}
 
-	mq := NewMiddlewareQueue(LoggerMiddleware, TrackerMiddleware, ContextAsMiddleware(), TimeoutMiddleware)
+	logInst, err := logger.NewLogger(env.LoggerConfigFile())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "logger init error: %v", err)
+		return nil
+	}
+	panicLogger, err := logger.NewPanicLogger(env.LoggerConfigFile())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "panic logger init error: %v", err)
+		return nil
+	}
+
+	mq := NewMiddlewareQueue(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware, ContextAsMiddleware(), TimeoutMiddleware)
 
 	return &Server{
 		addr:        env.Addr(),
@@ -44,6 +58,8 @@ func New(conf string) *Server {
 		rateLimiter: rateLimiter,
 		closeChan:   make(chan struct{}),
 		mq:          mq,
+		logger:      logInst,
+		panicLogger: panicLogger,
 	}
 }
 

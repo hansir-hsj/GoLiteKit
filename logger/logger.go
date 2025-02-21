@@ -97,10 +97,10 @@ func (c *LogConfig) PanicFileName() string {
 	return filepath.Join(c.Dir, "panic.log")
 }
 
-func NewLogger(ctx context.Context, loggerConfig ...string) (Logger, error) {
+func NewLogger(loggerConfig ...string) (Logger, error) {
 	opts := &slog.HandlerOptions{
 		Level:     LevelDebug,
-		AddSource: true,
+		AddSource: false,
 		// 自定义日志级别
 		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
 			if attr.Key == slog.LevelKey {
@@ -116,7 +116,7 @@ func NewLogger(ctx context.Context, loggerConfig ...string) (Logger, error) {
 	}
 
 	if len(loggerConfig) == 0 {
-		return NewConsoleLogger(ctx, opts)
+		return NewConsoleLogger(opts)
 	}
 
 	logConf, err := parse(loggerConfig[0])
@@ -131,8 +131,8 @@ func NewLogger(ctx context.Context, loggerConfig ...string) (Logger, error) {
 	opts.Level = logLevel
 
 	if logConf.Dir != "" && logConf.FileName != "" {
-		return NewTextLogger(ctx, logConf, opts)
+		return NewTextLogger(logConf, opts)
 	}
 
-	return NewConsoleLogger(ctx, opts)
+	return NewConsoleLogger(opts)
 }
