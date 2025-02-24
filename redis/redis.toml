@@ -1,0 +1,17 @@
+[redis]
+username = ""
+password = ""
+host = ""
+port = 6379
+protocol = ""
+
+[redis.Timeout]
+dialTimeout = 3000
+readTimeout = 3000
+writeTimeout = 3000
+
+[redis.Conn]
+poolSize = 10
+poolTimeout = 1000
+minIdleConns = 1
+maxIdleConns = 5

@@ -142,17 +142,29 @@ func RateBurst() int {
 }
 
 func DBConfigFile() string {
+	if defaultEnv.DB == "" {
+		return ""
+	}
 	return filepath.Join(ConfDir(), defaultEnv.DB)
 }
 
 func LoggerConfigFile() string {
+	if defaultEnv.Logger == "" {
+		return ""
+	}
 	return filepath.Join(ConfDir(), defaultEnv.Logger)
 }
 
 func TLSCertFile() string {
+	if defaultEnv.CertFile == "" {
+		return ""
+	}
 	return filepath.Join(ConfDir(), defaultEnv.CertFile)
 }
 
 func TLSKeyFile() string {
+	if defaultEnv.KeyFile == "" {
+		return ""
+	}
 	return filepath.Join(ConfDir(), defaultEnv.KeyFile)
 }
