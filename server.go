@@ -80,8 +80,10 @@ func (s *Server) Start() {
 	go s.handleSignal()
 
 	var err error
-	if env.TLSCertFile() != "" && env.TLSKeyFile() != "" {
-		s.httpServer.ListenAndServeTLS(env.TLSCertFile(), env.TLSKeyFile())
+	certFile := env.TLSCertFile()
+	keyFile := env.TLSKeyFile()
+	if certFile != "" && keyFile != "" {
+		s.httpServer.ListenAndServeTLS(certFile, keyFile)
 	} else {
 		err = s.httpServer.ListenAndServe()
 	}

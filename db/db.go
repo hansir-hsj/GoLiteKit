@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"github/hsj/GoLiteKit/config"
 	"github/hsj/GoLiteKit/env"
-	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	DB *gorm.DB
+	defaultDB *gorm.DB
 )
 
 type Config struct {
@@ -37,8 +37,8 @@ type Config struct {
 	gorm.Config
 }
 
-func NewORM() *gorm.DB {
-	return DB
+func NewDB() *gorm.DB {
+	return defaultDB
 }
 
 func parse(conf string) (*Config, error) {
@@ -77,18 +77,18 @@ func Init(conf ...string) error {
 	}
 	config, err := parse(dbConf)
 	if err != nil {
-		log.Printf("Failed to open database connection: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to open database connection: %v\n", err)
 		return err
 	}
 	db, err := gorm.Open(mysqlDriver.Open(config.DSN), config)
 	if err != nil {
-		log.Printf("Failed to get SQL database connection: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to open database connection: %v\n", err)
 		return err
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Printf("Failed to get SQL database connection: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to get SQL database connection: %v\n", err)
 		return err
 	}
 
@@ -103,10 +103,10 @@ func Init(conf ...string) error {
 	}
 
 	if err := sqlDB.Ping(); err != nil {
-		log.Printf("Failed to ping database: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to ping database: %v\n", err)
 		return err
 	}
-	DB = db
+	defaultDB = db
 
 	return nil
 }
