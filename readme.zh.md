@@ -18,4 +18,4 @@
    - 请求追踪中间件
    - 基于`golang.org/x/time/rate`的限流中间件
 6. 支持静态文件服务
-7. 集成了gorm框架
+7. 集成了gorm和go-redis框架

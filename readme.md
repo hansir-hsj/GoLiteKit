@@ -18,4 +18,4 @@ A concise and lightweight Go language framework for rapid development of web app
     - Request tracking middleware
     - Rate - limiting middleware based on `golang.org/x/time/rate`
 6. Support static file serving
-7. Integrate GORM framework
+7. Integrate gorm and go-redis framework
