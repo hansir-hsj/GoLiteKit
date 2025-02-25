@@ -1,10 +1,11 @@
 package env
 
 import (
-	"github/hsj/GoLiteKit/config"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/hansir-hsj/GoLiteKit/config"
 )
 
 var defaultEnv = &Env{}

@@ -2,7 +2,8 @@ package golitekit
 
 import (
 	"context"
-	"github/hsj/GoLiteKit/logger"
+
+	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
 func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Middleware {
