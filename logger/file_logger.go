@@ -13,7 +13,7 @@ import (
 var _ Rotator = (*FileLogger)(nil)
 
 type FileLogger struct {
-	logConf *LogConfig
+	logConf *Config
 	opts    *slog.HandlerOptions
 
 	filePath string
@@ -28,7 +28,7 @@ type FileLogger struct {
 	mu sync.Mutex
 }
 
-func NewTextLogger(logConf *LogConfig, opts *slog.HandlerOptions) (*FileLogger, error) {
+func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, error) {
 	err := os.MkdirAll(logConf.Dir, 0755)
 	if err != nil {
 		return nil, err
