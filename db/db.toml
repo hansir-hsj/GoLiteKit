@@ -1,4 +1,5 @@
 # Data Source Name
+[db]
 dsn = "xx"
 username = "xx"
 password = "xx"
@@ -7,10 +8,13 @@ host = ""
 port = 3306
 database = "xx"
 parseTime = true
+
+[db.Timeout]
 timeout = 1500
 readTimeout = 1500
 writeTimeout = 1500
 
+[db.Conn]
 maxOpenConns = 10
 maxIdleConns = 5
 # 单位秒

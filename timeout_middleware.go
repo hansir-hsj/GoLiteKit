@@ -3,8 +3,9 @@ package golitekit
 import (
 	"context"
 	"fmt"
-	"github/hsj/GoLiteKit/env"
 	"log"
+
+	"github.com/hansir-hsj/GoLiteKit/env"
 )
 
 func TimeoutMiddleware(ctx context.Context, queue MiddlewareQueue) error {

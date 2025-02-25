@@ -1,8 +1,9 @@
 package config
 
 import (
-	"github/hsj/GoLiteKit/config/test_data"
 	"testing"
+
+	"github.com/hansir-hsj/GoLiteKit/config/test_data"
 )
 
 func TestConfigParsing(t *testing.T) {
