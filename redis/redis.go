@@ -3,10 +3,11 @@ package redis
 import (
 	"context"
 	"fmt"
-	"github/hsj/GoLiteKit/config"
-	"github/hsj/GoLiteKit/env"
 	"os"
 	"path/filepath"
+
+	"github.com/hansir-hsj/GoLiteKit/config"
+	"github.com/hansir-hsj/GoLiteKit/env"
 
 	"github.com/redis/go-redis/v9"
 )

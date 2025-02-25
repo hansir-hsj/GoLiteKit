@@ -3,7 +3,8 @@ package golitekit
 import (
 	"context"
 	"errors"
-	"github/hsj/GoLiteKit/logger"
+
+	"github.com/hansir-hsj/GoLiteKit/logger"
 
 	"golang.org/x/time/rate"
 )

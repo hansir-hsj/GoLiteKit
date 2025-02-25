@@ -2,11 +2,13 @@ package db
 
 import (
 	"fmt"
-	"github/hsj/GoLiteKit/config"
-	"github/hsj/GoLiteKit/env"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/hansir-hsj/GoLiteKit/config"
+
+	"github.com/hansir-hsj/GoLiteKit/env"
 
 	"github.com/go-sql-driver/mysql"
 	mysqlDriver "gorm.io/driver/mysql"
@@ -17,22 +19,33 @@ var (
 	defaultDB *gorm.DB
 )
 
-type Config struct {
-	DSN          string `json:"dsn"`
-	Username     string `json:"username"`
-	Password     string `json:"password"`
-	Protocol     string `json:"protocol"`
-	Host         string `json:"host"`
-	Port         int    `json:"port"`
-	Database     string `json:"database"`
-	Charset      string `json:"charset"`
-	Timeout      int    `json:"timeout"`
-	ReadTimeout  int    `json:"readTimeout"`
-	WriteTimeout int    `json:"writeTimeout"`
+type DbTimeout struct {
+	Timeout      int `toml:"timeout"`
+	ReadTimeout  int `toml:"readTimeout"`
+	WriteTimeout int `toml:"writeTimeout"`
+}
 
-	MaxOpenConns    int `json:"maxOpenConns"`
-	MaxIdleConns    int `json:"maxIdleConns"`
-	ConnMaxLifeTime int `json:"connMaxLifeTime"`
+type DbConn struct {
+	MaxOpenConns    int `toml:"maxOpenConns"`
+	MaxIdleConns    int `toml:"maxIdleConns"`
+	ConnMaxLifeTime int `toml:"connMaxLifeTime"`
+}
+
+type DbConfig struct {
+	DSN      string `toml:"dsn"`
+	Username string `toml:"username"`
+	Password string `toml:"password"`
+	Protocol string `toml:"protocol"`
+	Host     string `toml:"host"`
+	Port     int    `toml:"port"`
+	Database string `toml:"database"`
+	Charset  string `toml:"charset"`
+}
+
+type Config struct {
+	DbConfig  `toml:"db"`
+	DbTimeout `toml:"Timeout"`
+	DbConn    `toml:"Conn"`
 
 	gorm.Config
 }

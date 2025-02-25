@@ -3,14 +3,15 @@ package golitekit
 import (
 	"context"
 	"fmt"
-	"github/hsj/GoLiteKit/env"
-	"github/hsj/GoLiteKit/logger"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/hansir-hsj/GoLiteKit/env"
+	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
 type Server struct {
