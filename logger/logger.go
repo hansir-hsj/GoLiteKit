@@ -47,7 +47,7 @@ var LevelMap = map[string]slog.Level{
 	"FATAL": LevelFatal,
 }
 
-type LogConfig struct {
+type LoggerConfig struct {
 	Dir      string `toml:"dir"`
 	FileName string `toml:"filename"`
 	MinLevel string `toml:"level"`
@@ -59,41 +59,45 @@ type LogConfig struct {
 	MaxLines int64         `toml:"maxLines"`
 }
 
-func parse(conf string) (*LogConfig, error) {
-	var logConfig LogConfig
-	if err := config.Parse(conf, &logConfig); err != nil {
+type Config struct {
+	LoggerConfig `toml:"logger"`
+}
+
+func parse(conf string) (*Config, error) {
+	var lConfig Config
+	if err := config.Parse(conf, &lConfig); err != nil {
 		return nil, err
 	}
-	if logConfig.Dir == "" {
-		logConfig.Dir = "logs"
+	if lConfig.Dir == "" {
+		lConfig.Dir = "logs"
 	}
-	absDir, err := filepath.Abs(logConfig.Dir)
+	absDir, err := filepath.Abs(lConfig.Dir)
 	if err != nil {
 		return nil, err
 	}
-	logConfig.Dir = absDir
+	lConfig.Dir = absDir
 
-	if logConfig.MaxAge <= 30*time.Minute {
-		logConfig.MaxAge = 30 * time.Minute
+	if lConfig.MaxAge <= 30*time.Minute {
+		lConfig.MaxAge = 30 * time.Minute
 	}
-	if logConfig.MaxLines <= 10000 {
-		logConfig.MaxLines = 10000
+	if lConfig.MaxLines <= 10000 {
+		lConfig.MaxLines = 10000
 	}
-	if logConfig.MaxSize <= 10*1<<20 {
-		logConfig.MaxSize = 10 * 1 << 20
+	if lConfig.MaxSize <= 10*1<<20 {
+		lConfig.MaxSize = 10 * 1 << 20
 	}
 
-	return &logConfig, nil
+	return &lConfig, nil
 }
 
-func (c *LogConfig) LogFileName() string {
+func (c *Config) LogFileName() string {
 	if c.FileName == "" {
 		c.FileName = "app.log"
 	}
 	return filepath.Join(c.Dir, c.FileName)
 }
 
-func (c *LogConfig) PanicFileName() string {
+func (c *Config) PanicFileName() string {
 	return filepath.Join(c.Dir, "panic.log")
 }
 

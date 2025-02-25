@@ -1,3 +1,4 @@
+[logger]
 dir = "logs"
 filename = "test.log"
 level = "trace"
