@@ -19,3 +19,4 @@ A concise and lightweight Go language framework for rapid development of web app
     - Rate - limiting middleware based on `golang.org/x/time/rate`
 6. Support static file serving
 7. Integrate gorm and go-redis framework
+8. Provide a command-line tool *glk* to facilitate the quick creation of applications. Please use `go install github.com/hansir-hsj/GoLiteKit/glk@latest` to install it.
