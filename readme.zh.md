@@ -19,3 +19,4 @@
    - 基于`golang.org/x/time/rate`的限流中间件
 6. 支持静态文件服务
 7. 集成了gorm和go-redis框架
+8. 提供命令行工具*glk*，方便快速创建应用。请使用`go install github.com/hansir-hsj/GoLiteKit/glk@latest`进行安装
