@@ -130,6 +130,12 @@ func CreateApp(cmd *cobra.Command, args []string) {
 		return
 	}
 
+	err = os.Chdir(dstDir)
+	if err != nil {
+		fmt.Printf("change directory to %s failed: %s\n", dstDir, err)
+		return
+	}
+
 	goCmd = exec.Command("go", "mod", "tidy")
 	if _, err := goCmd.Output(); err != nil {
 		fmt.Printf("go mod tidy failed: %s\n", err)
