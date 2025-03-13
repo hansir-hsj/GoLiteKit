@@ -15,18 +15,22 @@ type EnvHttpServer struct {
 	RunMode string `toml:"runMode"`
 	Addr    string `toml:"addr"`
 
+	MaxHeaderBytes int `toml:"maxHeaderBytes"`
+
+	EnvTimeout   `toml:"Timeout"`
+	EnvRateLimit `toml:"RateLimit"`
+	EnvLogger    `toml:"Logger"`
+	EnvDB        `toml:"DB"`
+	EnvRedis     `toml:"Redis"`
+	EnvTLSConfig `toml:"TLSConfig"`
+}
+
+type EnvTimeout struct {
 	ReadTimeout       int `toml:"readTimeout"`
 	ReadHeaderTimeout int `toml:"readHeaderTimeout"`
 	WriteTimeout      int `toml:"writeTimeout"`
 	IdleTimeout       int `toml:"idleTimeout"`
 	ShutdownTimeout   int `toml:"shutdownTimeout"`
-
-	MaxHeaderBytes int `toml:"maxHeaderBytes"`
-
-	EnvRateLimit `toml:"RateLimit"`
-	EnvLogger    `toml:"Logger"`
-	EnvDB        `toml:"DB"`
-	EnvTLSConfig `toml:"TLSConfig"`
 }
 
 type EnvRateLimit struct {
@@ -40,6 +44,10 @@ type EnvLogger struct {
 
 type EnvDB struct {
 	DB string `toml:"configFile"`
+}
+
+type EnvRedis struct {
+	Redis string `toml:"configFile"`
 }
 
 type EnvTLSConfig struct {
@@ -147,6 +155,13 @@ func DBConfigFile() string {
 		return ""
 	}
 	return filepath.Join(ConfDir(), defaultEnv.DB)
+}
+
+func RedisConfigFile() string {
+	if defaultEnv.Redis == "" {
+		return ""
+	}
+	return filepath.Join(ConfDir(), defaultEnv.Redis)
 }
 
 func LoggerConfigFile() string {
