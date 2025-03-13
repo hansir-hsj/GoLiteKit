@@ -6,6 +6,8 @@ runMode = "debug"
 # 监听地址
 addr = ":8080"
 
+# 超时时间配置-毫秒
+[HttpServer.Timeout]
 # 写超时
 writeTimeout = 15000
 # 读超时
@@ -31,3 +33,8 @@ configFile = "logger.toml"
 [HttpServer.DB]
 # 配置文件
 configFile = "db.toml"
+
+# Redis配置
+[HttpServer.Redis]
+# 配置文件
+configFile = "redis.toml"
