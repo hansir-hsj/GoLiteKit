@@ -3,6 +3,7 @@ appName = "golitekit"
 runMode = "debug"
 addr = ":8080"
 
+[HttpServer.Timeout]
 writeTimeout = 15000
 readTimeout = 200
 idleTimeout = 5000
