@@ -12,8 +12,8 @@ type Router struct {
 	wildRouters map[string]*Trie
 }
 
-func NewRouter() Router {
-	return Router{
+func NewRouter() *Router {
+	return &Router{
 		static:      make(map[string]Controller),
 		routers:     make(map[string]map[string]Controller, 4),
 		wildRouters: make(map[string]*Trie, 4),

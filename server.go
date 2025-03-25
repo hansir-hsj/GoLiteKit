@@ -16,7 +16,7 @@ import (
 
 type Server struct {
 	addr        string
-	router      Router
+	router      *Router
 	rateLimiter *RateLimiter
 	mq          MiddlewareQueue
 
@@ -110,6 +110,12 @@ func (s *Server) handleSignal() {
 
 	s.httpServer.Shutdown(ctx)
 	s.closeChan <- struct{}{}
+}
+
+func (s *Server) NewRouterGroup(prefix string) *RouterGroup {
+	group := newRouterGroup(prefix)
+	group.server = s
+	return group
 }
 
 func (s *Server) OnGet(path string, controller Controller) {
