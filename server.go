@@ -51,7 +51,12 @@ func New(conf string) *Server {
 		return nil
 	}
 
-	mq := NewMiddlewareQueue(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware, ContextAsMiddleware(), TimeoutMiddleware)
+	// inner middleware
+	mq := NewMiddlewareQueue()
+	mq.Use(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware, ContextAsMiddleware(), TimeoutMiddleware)
+	if rateLimiter != nil {
+		mq.Use(rateLimiter.RateLimiterAsMiddleware())
+	}
 
 	return &Server{
 		addr:        env.Addr(),
@@ -169,6 +174,10 @@ func (s *Server) Static(path, realPath string) {
 	})
 }
 
+func (s *Server) UseMiddleware(middlewares ...Middleware) {
+	s.mq.Use(middlewares...)
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	ctx := WithContext(req.Context())
 	ctx = logger.WithLoggerContext(ctx)
@@ -176,10 +185,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
 
 	mq := s.mq.Clone()
-
-	if s.rateLimiter != nil {
-		mq.Use(s.rateLimiter.RateLimiterAsMiddleware())
-	}
 
 	controller, params, ok := s.router.Route(req.Method, req.URL.Path)
 	if !ok {
