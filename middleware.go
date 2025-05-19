@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"slices"
 )
 
 type Middleware func(ctx context.Context, queue MiddlewareQueue) error
@@ -13,7 +14,7 @@ func NewMiddlewareQueue(middlewares ...Middleware) MiddlewareQueue {
 }
 
 func (mq MiddlewareQueue) Clone() MiddlewareQueue {
-	return append(MiddlewareQueue{}, mq...)
+	return slices.Clone(mq)
 }
 
 func (mq *MiddlewareQueue) Use(middlewares ...Middleware) {
