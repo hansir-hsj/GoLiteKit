@@ -20,6 +20,14 @@ func NewRouter() *Router {
 	}
 }
 
+func (r *Router) OnAny(path string, controller Controller) {
+	path = dealSlash(path)
+	r.register(http.MethodGet, path, controller)
+	r.register(http.MethodPost, path, controller)
+	r.register(http.MethodPut, path, controller)
+	r.register(http.MethodDelete, path, controller)
+}
+
 func (r *Router) OnPost(path string, controller Controller) {
 	path = dealSlash(path)
 	r.register(http.MethodPost, path, controller)
