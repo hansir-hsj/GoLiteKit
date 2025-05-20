@@ -123,6 +123,10 @@ func (s *Server) NewRouterGroup(prefix string) *RouterGroup {
 	return group
 }
 
+func (s *Server) OnAny(path string, controller Controller) {
+	s.router.OnAny(path, controller)
+}
+
 func (s *Server) OnGet(path string, controller Controller) {
 	s.router.OnGet(path, controller)
 }
