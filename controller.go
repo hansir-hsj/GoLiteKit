@@ -15,6 +15,11 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
+const (
+	DefaultMaxMemorySize = 10 << 20
+	DefaultMaxBodySize   = 10 << 20
+)
+
 type RequestSizeLimiter interface {
 	MaxMemorySize() int64
 	MaxBodySize() int64
@@ -65,11 +70,11 @@ func (c *BaseController) Finalize(ctx context.Context) error {
 func (c *BaseController) parseBody() error {
 	maxMemorySize := c.MaxMemorySize()
 	if maxMemorySize <= 0 {
-		maxMemorySize = 10 << 20 // 10M
+		maxMemorySize = DefaultMaxMemorySize // 10M
 	}
 	maxBodySize := c.MaxBodySize()
 	if maxBodySize <= 0 {
-		maxBodySize = 10 << 20 // 10M
+		maxBodySize = DefaultMaxBodySize // 10M
 	}
 
 	httpReq := c.request

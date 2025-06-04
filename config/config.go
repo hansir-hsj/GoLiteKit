@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -63,6 +64,7 @@ func Register(ext string, decoder Decoder) error {
 func Parse(path string, obj any) error {
 	data, err := ReadFile(path)
 	if err != nil {
+		log.Printf("Failed to parse config file %s: %v", path, err)
 		return err
 	}
 	ext := filepath.Ext(path)

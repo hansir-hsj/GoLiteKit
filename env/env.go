@@ -8,6 +8,14 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/config"
 )
 
+const (
+	DefaultReadTimeout       = 1000 * time.Millisecond
+	DefaultWriteTimeout      = 1000 * time.Millisecond
+	DefaultReadHeaderTimeout = 200 * time.Millisecond
+	DefaultIdleTimeout       = 2 * time.Second
+	DefaultShutdownTimeout   = 2 * time.Second
+)
+
 var defaultEnv = &Env{}
 
 type EnvHttpServer struct {
@@ -99,35 +107,35 @@ func ConfDir() string {
 
 func ReadTimeout() time.Duration {
 	if defaultEnv.ReadTimeout == 0 {
-		return 200 * time.Millisecond
+		return DefaultReadTimeout
 	}
 	return time.Duration(defaultEnv.ReadTimeout) * time.Millisecond
 }
 
 func ReadHeaderTimeout() time.Duration {
 	if defaultEnv.ReadHeaderTimeout == 0 {
-		return 100 * time.Millisecond
+		return DefaultReadHeaderTimeout
 	}
 	return time.Duration(defaultEnv.ReadHeaderTimeout) * time.Millisecond
 }
 
 func WriteTimeout() time.Duration {
 	if defaultEnv.WriteTimeout == 0 {
-		return 500 * time.Millisecond
+		return DefaultWriteTimeout
 	}
 	return time.Duration(defaultEnv.WriteTimeout) * time.Millisecond
 }
 
 func IdleTimeout() time.Duration {
 	if defaultEnv.IdleTimeout == 0 {
-		return 2 * time.Second
+		return DefaultIdleTimeout
 	}
 	return time.Duration(defaultEnv.IdleTimeout) * time.Millisecond
 }
 
 func ShutdownTimeout() time.Duration {
 	if defaultEnv.ShutdownTimeout == 0 {
-		return 2 * time.Second
+		return DefaultShutdownTimeout
 	}
 	return time.Duration(defaultEnv.ShutdownTimeout) * time.Millisecond
 }

@@ -5,6 +5,11 @@ import (
 	"net/http"
 )
 
+// 使用 wrapFunc 注册标准的 http.HandlerFunc
+// s.OnGet("/hello", wrapFunc(func(w http.ResponseWriter, r *http.Request) {
+// 	fmt.Fprintf(w, "Hello, World!")
+// }))
+
 type ControllerWrapper struct {
 	BaseController
 	handler http.HandlerFunc
@@ -35,8 +40,3 @@ func WrapHandler(handler http.Handler) Controller {
 		handler: handler.ServeHTTP,
 	}
 }
-
-// 使用 wrapFunc 注册标准的 http.HandlerFunc
-// s.OnGet("/hello", wrapFunc(func(w http.ResponseWriter, r *http.Request) {
-// 	fmt.Fprintf(w, "Hello, World!")
-// }))

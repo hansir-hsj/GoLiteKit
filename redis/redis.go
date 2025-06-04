@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
@@ -57,6 +58,7 @@ func NewRedis() *RedisClient {
 func parse(conf string) (*Config, error) {
 	var redisConfig Config
 	if err := config.Parse(conf, &redisConfig); err != nil {
+		log.Printf("Failed to parse redis config file %s: %v", conf, err)
 		return nil, err
 	}
 

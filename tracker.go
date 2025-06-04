@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -28,6 +29,8 @@ type Tracker struct {
 
 	stack    []*serviceTracker
 	services map[string]*serviceTracker
+
+	mu sync.Mutex
 }
 
 func GetTracker(ctx context.Context) *Tracker {
@@ -68,6 +71,9 @@ func (s *serviceTracker) end() {
 }
 
 func (t *Tracker) Start(name string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	st := &serviceTracker{
 		name: name,
 	}
@@ -82,6 +88,9 @@ func (t *Tracker) Start(name string) {
 }
 
 func (t *Tracker) End() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if len(t.stack) > 0 {
 		t.stack[len(t.stack)-1].end()
 	}
