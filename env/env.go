@@ -21,6 +21,7 @@ var defaultEnv = &Env{}
 type EnvHttpServer struct {
 	AppName string `toml:"appName"`
 	RunMode string `toml:"runMode"`
+	NetWork string `toml:"network"` // "tcp", "unix", etc.
 	Addr    string `toml:"addr"`
 
 	MaxHeaderBytes int `toml:"maxHeaderBytes"`
@@ -91,6 +92,10 @@ func AppName() string {
 
 func RunMode() string {
 	return defaultEnv.RunMode
+}
+
+func NetWork() string {
+	return defaultEnv.NetWork
 }
 
 func Addr() string {
