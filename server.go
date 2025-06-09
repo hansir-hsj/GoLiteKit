@@ -2,33 +2,37 @@ package golitekit
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
+	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/env"
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
 type Server struct {
-	addr        string
-	router      *Router
-	rateLimiter *RateLimiter
-	mq          MiddlewareQueue
+	network string
+	addr    string
 
+	mux        *http.ServeMux
+	listener   net.Listener
 	httpServer http.Server
-	closeChan  chan struct{}
 
 	logger      logger.Logger
 	panicLogger *logger.PanicLogger
+	rateLimiter *RateLimiter
+	mq          MiddlewareQueue
+
+	closeChan chan struct{}
 }
 
 func New(conf string) *Server {
-	router := NewRouter()
+	mux := http.NewServeMux()
 
 	if err := env.Init(conf); err != nil {
 		fmt.Fprintf(os.Stderr, "env init error: %v", err)
@@ -59,8 +63,9 @@ func New(conf string) *Server {
 	}
 
 	return &Server{
+		network:     env.Network(),
 		addr:        env.Addr(),
-		router:      router,
+		mux:         mux,
 		rateLimiter: rateLimiter,
 		closeChan:   make(chan struct{}),
 		mq:          mq,
@@ -69,14 +74,13 @@ func New(conf string) *Server {
 	}
 }
 
-func (s *Server) Start() {
+func (s *Server) Start() error {
 	s.httpServer = http.Server{
-		Addr:           s.addr,
 		ReadTimeout:    env.ReadTimeout(),
 		WriteTimeout:   env.WriteTimeout(),
 		IdleTimeout:    env.IdleTimeout(),
 		MaxHeaderBytes: env.MaxHeaderBytes(),
-		Handler:        s,
+		Handler:        s.mux,
 	}
 
 	if env.ReadHeaderTimeout() > 0 {
@@ -85,19 +89,34 @@ func (s *Server) Start() {
 
 	go s.handleSignal()
 
-	var err error
-	certFile := env.TLSCertFile()
-	keyFile := env.TLSKeyFile()
-	if certFile != "" && keyFile != "" {
-		s.httpServer.ListenAndServeTLS(certFile, keyFile)
-	} else {
-		err = s.httpServer.ListenAndServe()
+	l, err := net.Listen(s.network, s.addr)
+	if err != nil {
+		return fmt.Errorf("listen error: %v", err)
 	}
 
-	if err != nil && err != http.ErrServerClosed {
-		fmt.Printf("server start error: %v", err)
+	if env.TLS() {
+		certFile := env.TLSCertFile()
+		keyFile := env.TLSKeyFile()
+		if certFile == "" || keyFile == "" {
+			return fmt.Errorf("TLS is enabled but certFile or keyFile is not set")
+		}
+		cer, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return err
+		}
+		config := &tls.Config{Certificates: []tls.Certificate{cer}}
+		l = tls.NewListener(l, config)
 	}
+
+	s.listener = l
+	err = s.httpServer.Serve(l)
+	if err != nil && err != http.ErrServerClosed {
+		return fmt.Errorf("server start error: %s", err)
+	}
+
 	<-s.closeChan
+
+	return nil
 }
 
 func (s *Server) handleSignal() {
@@ -106,9 +125,8 @@ func (s *Server) handleSignal() {
 	sig := <-quit
 	switch sig {
 	case syscall.SIGINT:
-		fmt.Println("server shutdown by SIGINT")
 	case syscall.SIGTERM:
-		fmt.Println("server shutdown by SIGTERM")
+		fmt.Fprintf(os.Stderr, "%s receive signal %v\n", time.Now(), sig)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), env.ShutdownTimeout())
 	defer cancel()
@@ -117,91 +135,51 @@ func (s *Server) handleSignal() {
 	s.closeChan <- struct{}{}
 }
 
-func (s *Server) NewRouterGroup(prefix string) *RouterGroup {
-	group := newRouterGroup(prefix)
-	group.server = s
-	return group
-}
-
 func (s *Server) OnAny(path string, controller Controller) {
-	s.router.OnAny(path, controller)
+	s.registerHandler(http.MethodGet, path, controller)
+	s.registerHandler(http.MethodPost, path, controller)
+	s.registerHandler(http.MethodPut, path, controller)
+	s.registerHandler(http.MethodDelete, path, controller)
 }
 
 func (s *Server) OnGet(path string, controller Controller) {
-	s.router.OnGet(path, controller)
+	s.registerHandler(http.MethodGet, path, controller)
 }
 
 func (s *Server) OnPost(path string, controller Controller) {
-	s.router.OnPost(path, controller)
+	s.registerHandler(http.MethodPost, path, controller)
 }
 
 func (s *Server) OnPut(path string, controller Controller) {
-	s.router.OnPut(path, controller)
+	s.registerHandler(http.MethodPut, path, controller)
 }
 
 func (s *Server) OnDelete(path string, controller Controller) {
-	s.router.OnDelete(path, controller)
+	s.registerHandler(http.MethodDelete, path, controller)
 }
 
-func (s *Server) Static(path, realPath string) {
-	if !filepath.IsAbs(realPath) {
-		realPath = filepath.Join(env.RootDir(), realPath)
+func (s *Server) registerHandler(method, path string, controller Controller) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		ctx := WithContext(r.Context())
+		ctx = logger.WithLoggerContext(ctx)
+		gcx := GetContext(ctx)
+		gcx.SetContextOptions(WithRequest(r), WithResponseWriter(w))
+
+		mq := s.mq.Clone()
+
+		cloned := CloneController(controller)
+		mq.Use(controllerAsMiddleware(cloned))
+		mq.Next(ctx)
 	}
-	realPath = filepath.Clean(realPath)
 
-	_, err := os.Stat(realPath)
-	if err != nil {
-		panic(fmt.Sprintf("path err %v", err))
-	}
-
-	filepath.Walk(realPath, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(realPath, p)
-		if err != nil {
-			return err
-		}
-		tmpPath := filepath.Join(path, relPath)
-		if info.IsDir() {
-			if !strings.HasSuffix(p, "/") {
-				p = p + "/"
-			}
-		}
-
-		s.router.Static(tmpPath, &StaticController{
-			Path: p,
-		})
-
-		return nil
-	})
+	s.mux.HandleFunc(path, handler)
 }
 
 func (s *Server) UseMiddleware(middlewares ...Middleware) {
 	s.mq.Use(middlewares...)
-}
-
-func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	ctx := WithContext(req.Context())
-	ctx = logger.WithLoggerContext(ctx)
-	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req), WithResponseWriter(w))
-
-	mq := s.mq.Clone()
-
-	controller, params, ok := s.router.Route(req.Method, req.URL.Path)
-	if !ok {
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-	if params != nil {
-		gcx.SetContextOptions(WithRouterParams(params))
-	}
-
-	cloned := CloneController(controller)
-
-	mq.Use(controllerAsMiddleware(cloned))
-
-	mq.Next(ctx)
 }
