@@ -1,6 +1,7 @@
 [HttpServer]
 appName = "golitekit"
 runMode = "debug"
+network = "tcp4"
 addr = ":8080"
 
 [HttpServer.Timeout]
@@ -20,5 +21,6 @@ configFile = "logger.toml"
 configFile = "db.toml"
 
 [HttpServer.TLSConfig]
+tls = false
 certFile = "tls/server.crt"
 keyFile = "tls/server.key"
