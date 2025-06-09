@@ -16,12 +16,14 @@ const (
 	DefaultShutdownTimeout   = 2 * time.Second
 )
 
-var defaultEnv = &Env{}
+var (
+	defaultEnv *Env
+)
 
 type EnvHttpServer struct {
 	AppName string `toml:"appName"`
 	RunMode string `toml:"runMode"`
-	NetWork string `toml:"network"` // "tcp", "unix", etc.
+	Network string `toml:"network"`
 	Addr    string `toml:"addr"`
 
 	MaxHeaderBytes int `toml:"maxHeaderBytes"`
@@ -60,13 +62,14 @@ type EnvRedis struct {
 }
 
 type EnvTLSConfig struct {
+	TLS      bool   `toml:"tls"`
 	CertFile string `toml:"certFile"`
 	KeyFile  string `toml:"keyFile"`
 }
 
 type Env struct {
-	RootDir string
-	ConfDir string
+	rootDir string
+	confDir string
 
 	EnvHttpServer `toml:"HttpServer"`
 }
@@ -76,8 +79,10 @@ func Init(path string) error {
 	if err != nil {
 		return err
 	}
-	defaultEnv.RootDir = curPath
-	defaultEnv.ConfDir = filepath.Join(curPath, "conf")
+	defaultEnv = &Env{
+		rootDir: curPath,
+		confDir: filepath.Join(curPath, "conf"),
+	}
 	err = config.Parse(path, defaultEnv)
 	if err != nil {
 		return err
@@ -94,8 +99,8 @@ func RunMode() string {
 	return defaultEnv.RunMode
 }
 
-func NetWork() string {
-	return defaultEnv.NetWork
+func Network() string {
+	return defaultEnv.Network
 }
 
 func Addr() string {
@@ -103,11 +108,11 @@ func Addr() string {
 }
 
 func RootDir() string {
-	return defaultEnv.RootDir
+	return defaultEnv.rootDir
 }
 
 func ConfDir() string {
-	return defaultEnv.ConfDir
+	return defaultEnv.confDir
 }
 
 func ReadTimeout() time.Duration {
@@ -182,6 +187,10 @@ func LoggerConfigFile() string {
 		return ""
 	}
 	return filepath.Join(ConfDir(), defaultEnv.Logger)
+}
+
+func TLS() bool {
+	return defaultEnv.TLS
 }
 
 func TLSCertFile() string {
