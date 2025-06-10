@@ -4,8 +4,8 @@
 
 A concise and lightweight Go language framework for rapid development of web applications.
 
-1. Implement the `context` interface to pass request context.
-2. Support wildcard routing matching.
+1. Implement routing function based on 'go 1.22 http.ServeMux'
+2. Implement the `context` interface to pass request context.
 3. Provide a `BaseController` base class to simplify controller development.
 4. Encapsulate a logging library based on `slog`:
     - Support log levels and custom log formats.
@@ -17,6 +17,5 @@ A concise and lightweight Go language framework for rapid development of web app
     - Timeout middleware
     - Request tracking middleware
     - Rate - limiting middleware based on `golang.org/x/time/rate`
-6. Support static file serving
-7. Integrate gorm and go-redis framework
-8. Provide a command-line tool *glk* to facilitate the quick creation of applications. Please use `go install github.com/hansir-hsj/GoLiteKit/glk@latest` to install it.
+6. Integrate gorm and go-redis framework
+7. Provide a command-line tool *glk* to facilitate the quick creation of applications. Please use `go install github.com/hansir-hsj/GoLiteKit/glk@latest` to install it.
