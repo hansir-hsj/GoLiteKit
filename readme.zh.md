@@ -4,8 +4,8 @@
 
 简洁轻量的go语言框架，用于快速开发web应用
 
-1. 实现`context`接口，用于传递请求上下文
-2. 支持wild通配符路由匹配
+1. 基于`go 1.22 http.ServeMux`实现路由功能
+2. 实现`context`接口，用于传递请求上下文
 3. 提供`BaseController`基类，简化控制器编写
 4. 基于`slog`的日志库封装
     - 支持日志分级和自定义格式
@@ -17,6 +17,5 @@
    - 超时中间件
    - 请求追踪中间件
    - 基于`golang.org/x/time/rate`的限流中间件
-6. 支持静态文件服务
-7. 集成了gorm和go-redis框架
-8. 提供命令行工具*glk*，方便快速创建应用。请使用`go install github.com/hansir-hsj/GoLiteKit/glk@latest`进行安装
+6. 集成了gorm和go-redis框架
+7. 提供命令行工具*glk*，方便快速创建应用。请使用`go install github.com/hansir-hsj/GoLiteKit/glk@latest`进行安装
