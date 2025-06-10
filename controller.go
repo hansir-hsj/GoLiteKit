@@ -267,17 +267,15 @@ func (c *BaseController) FormFile(key string) (multipart.File, *multipart.FileHe
 	return c.request.FormFile(key)
 }
 
-func (c *BaseController) RouterParamString(key string, def string) string {
-	params := c.gcx.routerParams
-	if val, ok := params[key]; ok && val != "" {
+func (c *BaseController) PathValueString(key string, def string) string {
+	if val := c.request.PathValue(key); val != "" {
 		return val
 	}
 	return def
 }
 
-func (c *BaseController) RouterParamInt(key string, def int) int {
-	params := c.gcx.routerParams
-	if val, ok := params[key]; ok && val != "" {
+func (c *BaseController) PathValueInt(key string, def int) int {
+	if val := c.request.PathValue(key); val != "" {
 		if ival, err := strconv.Atoi(val); err == nil {
 			return ival
 		}
@@ -285,9 +283,8 @@ func (c *BaseController) RouterParamInt(key string, def int) int {
 	return def
 }
 
-func (c *BaseController) RouterParamInt64(key string, def int64) int64 {
-	params := c.gcx.routerParams
-	if val, ok := params[key]; ok && val != "" {
+func (c *BaseController) PathValueInt64(key string, def int64) int64 {
+	if val := c.request.PathValue(key); val != "" {
 		if ival, err := strconv.ParseInt(val, 10, 64); err == nil {
 			return ival
 		}
@@ -295,9 +292,8 @@ func (c *BaseController) RouterParamInt64(key string, def int64) int64 {
 	return def
 }
 
-func (c *BaseController) RouterParamFloat32(key string, def float32) float32 {
-	params := c.gcx.routerParams
-	if val, ok := params[key]; ok && val != "" {
+func (c *BaseController) PathValueFloat32(key string, def float32) float32 {
+	if val := c.request.PathValue(key); val != "" {
 		if fval, err := strconv.ParseFloat(val, 32); err == nil {
 			return float32(fval)
 		}
@@ -305,9 +301,8 @@ func (c *BaseController) RouterParamFloat32(key string, def float32) float32 {
 	return def
 }
 
-func (c *BaseController) RouterParamFloat64(key string, def float64) float64 {
-	params := c.gcx.routerParams
-	if val, ok := params[key]; ok && val != "" {
+func (c *BaseController) PathValueFloat64(key string, def float64) float64 {
+	if val := c.request.PathValue(key); val != "" {
 		if fval, err := strconv.ParseFloat(val, 64); err == nil {
 			return fval
 		}
@@ -315,9 +310,8 @@ func (c *BaseController) RouterParamFloat64(key string, def float64) float64 {
 	return def
 }
 
-func (c *BaseController) RouterParamBool(key string, def bool) bool {
-	params := c.gcx.routerParams
-	if val, ok := params[key]; ok && val != "" {
+func (c *BaseController) PathValueBool(key string, def bool) bool {
+	if val := c.request.PathValue(key); val != "" {
 		return val == "1" || strings.ToLower(val) == "true"
 	}
 	return def

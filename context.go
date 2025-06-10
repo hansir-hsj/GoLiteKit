@@ -21,7 +21,6 @@ type ContextOption func(*Context)
 type Context struct {
 	request        *http.Request
 	responseWriter http.ResponseWriter
-	routerParams   map[string]string
 	logger         logger.Logger
 	panicLogger    *logger.PanicLogger
 
@@ -92,12 +91,6 @@ func WithResponseWriter(w http.ResponseWriter) ContextOption {
 	}
 }
 
-func WithRouterParams(params map[string]string) ContextOption {
-	return func(gcx *Context) {
-		gcx.routerParams = params
-	}
-}
-
 func WithLogger(logger logger.Logger) ContextOption {
 	return func(gcx *Context) {
 		gcx.logger = logger
@@ -116,10 +109,6 @@ func (ctx *Context) Request() *http.Request {
 
 func (ctx *Context) ResponseWriter() http.ResponseWriter {
 	return ctx.responseWriter
-}
-
-func (ctx *Context) RouterParams() map[string]string {
-	return ctx.routerParams
 }
 
 func (ctx *Context) Logger() logger.Logger {
