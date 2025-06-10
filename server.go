@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -178,6 +179,21 @@ func (s *Server) registerHandler(method, path string, controller Controller) {
 	}
 
 	s.mux.HandleFunc(path, handler)
+}
+
+func (s *Server) ServeFile(path, realPath string) {
+	if !filepath.IsAbs(realPath) {
+		realPath = filepath.Join(env.RootDir(), realPath)
+	}
+	realPath = filepath.Clean(realPath)
+
+	_, err := os.Stat(realPath)
+	if err != nil {
+		panic(fmt.Sprintf("path err %v", err))
+	}
+
+	fileServer := http.FileServer(http.Dir(realPath))
+	s.mux.Handle(path+"/", http.StripPrefix(path, fileServer))
 }
 
 func (s *Server) UseMiddleware(middlewares ...Middleware) {
