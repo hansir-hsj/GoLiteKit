@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
 	"sync"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -14,53 +13,6 @@ import (
 const (
 	globalContextKey ContextKey = iota
 )
-
-var extensionToContentType = map[string]string{
-	".html":  "text/html; charset=utf-8",
-	".css":   "text/css; charset=utf-8",
-	".js":    "application/javascript",
-	".xml":   "text/xml; charset=utf-8",
-	".jpg":   "image/jpeg",
-	".jpeg":  "image/jpeg",
-	".png":   "image/png",
-	".svg":   "image/svg+xml",
-	".ico":   "image/x-icon",
-	".webp":  "image/webp",
-	".gif":   "image/gif",
-	".mp3":   "audio/mpeg",
-	".mp4":   "video/mp4",
-	".pdf":   "application/pdf",
-	".zip":   "application/zip",
-	".tar":   "application/x-tar",
-	".gz":    "application/gzip",
-	".bz2":   "application/x-bzip2",
-	".7z":    "application/x-7z-compressed",
-	".rar":   "application/vnd.rar",
-	".doc":   "application/msword",
-	".docx":  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-	".xls":   "application/vnd.ms-excel",
-	".xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	".ppt":   "application/vnd.ms-powerpoint",
-	".pptx":  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-	".txt":   "text/plain; charset=utf-8",
-	".json":  "application/json; charset=utf-8",
-	".yaml":  "application/x-yaml; charset=utf-8",
-	".yml":   "application/x-yaml; charset=utf-8",
-	".csv":   "text/csv; charset=utf-8",
-	".tsv":   "text/tab-separated-values; charset=utf-8",
-	".ttf":   "font/ttf",
-	".otf":   "font/otf",
-	".woff":  "font/woff",
-	".woff2": "font/woff2",
-	".eot":   "application/vnd.ms-fontobject",
-	".wasm":  "application/wasm",
-	".webm":  "video/webm",
-	".weba":  "audio/webm",
-	".ogg":   "audio/ogg",
-	".ogv":   "video/ogg",
-	".flac":  "audio/flac",
-	".wav":   "audio/wav",
-}
 
 type ContextKey int
 
@@ -75,8 +27,6 @@ type Context struct {
 
 	rawResponse  any
 	jsonResponse any
-	rawFile      []byte
-	rawExt       string
 	rawHtml      string
 
 	data     map[string]any
@@ -192,11 +142,6 @@ func (ctx *Context) ServeHTML(html string) {
 	ctx.rawHtml = html
 }
 
-func (ctx *Context) ServeFile(ext string, file []byte) {
-	ctx.rawExt = ext
-	ctx.rawFile = file
-}
-
 func ContextAsMiddleware() Middleware {
 	return func(ctx context.Context, queue MiddlewareQueue) error {
 		err := queue.Next(ctx)
@@ -243,12 +188,6 @@ func ContextAsMiddleware() Middleware {
 		} else if gcx.rawHtml != "" {
 			w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 			w.Write([]byte(gcx.rawHtml))
-		} else if gcx.rawFile != nil && gcx.rawExt != "" {
-			if contentType := extensionToContentType[gcx.rawExt]; contentType != "" {
-				w.Header().Set("Content-Type", contentType)
-			}
-			w.Header().Set("Content-Length", strconv.FormatInt(int64(len(gcx.rawFile)), 10))
-			w.Write(gcx.rawFile)
 		}
 
 		return nil
