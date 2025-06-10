@@ -43,11 +43,11 @@ type BaseController struct {
 }
 
 func (c *BaseController) MaxMemorySize() int64 {
-	return 10 << 20
+	return DefaultMaxMemorySize
 }
 
 func (c *BaseController) MaxBodySize() int64 {
-	return 10 << 20
+	return DefaultMaxBodySize
 }
 
 func (c *BaseController) Init(ctx context.Context) error {
