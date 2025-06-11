@@ -27,7 +27,8 @@ type Server struct {
 	logger      logger.Logger
 	panicLogger *logger.PanicLogger
 	rateLimiter *RateLimiter
-	mq          MiddlewareQueue
+
+	mq MiddlewareQueue
 
 	closeChan chan struct{}
 }
@@ -58,7 +59,7 @@ func New(conf string) *Server {
 
 	// inner middleware
 	mq := NewMiddlewareQueue()
-	mq.Use(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware, ContextAsMiddleware(), TimeoutMiddleware)
+	mq.Use(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware(), ContextAsMiddleware(), TimeoutMiddleware())
 	if rateLimiter != nil {
 		mq.Use(rateLimiter.RateLimiterAsMiddleware())
 	}
@@ -168,14 +169,29 @@ func (s *Server) registerHandler(method, path string, controller Controller) {
 
 		ctx := WithContext(r.Context())
 		ctx = logger.WithLoggerContext(ctx)
+		r = r.WithContext(ctx)
 		gcx := GetContext(ctx)
 		gcx.SetContextOptions(WithRequest(r), WithResponseWriter(w))
 
-		mq := s.mq.Clone()
-
 		cloned := CloneController(controller)
-		mq.Use(controllerAsMiddleware(cloned))
-		mq.Next(ctx)
+		controllerHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			err := cloned.Init(ctx)
+			if err != nil {
+				return
+			}
+			err = cloned.Serve(ctx)
+			if err != nil {
+				return
+			}
+			err = cloned.Finalize(ctx)
+			if err != nil {
+				return
+			}
+		})
+
+		wrappedHandler := s.mq.Apply(controllerHandler)
+		wrappedHandler.ServeHTTP(w, r)
 	}
 
 	s.mux.HandleFunc(path, handler)
@@ -196,6 +212,6 @@ func (s *Server) ServeFile(path, realPath string) {
 	s.mux.Handle(path+"/", http.StripPrefix(path, fileServer))
 }
 
-func (s *Server) UseMiddleware(middlewares ...Middleware) {
+func (s *Server) UseMiddleware(middlewares ...HandlerMiddleware) {
 	s.mq.Use(middlewares...)
 }
