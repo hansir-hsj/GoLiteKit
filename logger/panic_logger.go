@@ -57,5 +57,7 @@ func (l *PanicLogger) Report(ctx context.Context, p any) {
 	length := runtime.Stack(stack, false)
 	stack = stack[:length]
 
-	fmt.Fprintf(l.file, "%s\n%s\nStack:\n%s\n", msg, l.caller(), stack)
+	if _, err := fmt.Fprintf(l.file, "%s\n%s\nStack:\n%s\n", msg, l.caller(), stack); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to write panic log: %v", err)
+	}
 }

@@ -31,7 +31,7 @@ type FileLogger struct {
 func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, error) {
 	err := os.MkdirAll(logConf.Dir, 0755)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create log directory %s: %w", logConf.Dir, err)
 	}
 	filePath := logConf.LogFileName()
 	target, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
@@ -158,7 +158,10 @@ func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	_ = l.logger.Handler().Handle(ctx, r)
+	if err := l.logger.Handler().Handle(ctx, r); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to log message: %v\n", err)
+		return
+	}
 
 	l.lines++
 }
