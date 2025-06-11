@@ -131,54 +131,41 @@ func (ctx *Context) ServeHTML(html string) {
 	ctx.rawHtml = html
 }
 
-func ContextAsMiddleware() Middleware {
-	return func(ctx context.Context, queue MiddlewareQueue) error {
-		err := queue.Next(ctx)
-		if err != nil {
-			return err
-		}
+func ContextAsMiddleware() HandlerMiddleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
 
-		if err := ctx.Err(); err != nil {
-			if err == context.Canceled {
-				return nil
-			}
-			return err
-		}
+			ctx := r.Context()
+			gcx := GetContext(ctx)
 
-		gcx := GetContext(ctx)
-		if gcx == nil {
-			return nil
-		}
-
-		w := gcx.ResponseWriter()
-
-		if gcx.jsonResponse != nil {
-			w.Header().Set("Content-Type", "application/json")
-			if bytes, ok := gcx.jsonResponse.([]byte); ok {
-				w.Write(bytes)
-			} else {
-				jsonData, err := json.Marshal(gcx.jsonResponse)
-				if err != nil {
-					return err
+			if gcx.jsonResponse != nil {
+				w.Header().Set("Content-Type", "application/json")
+				if bytes, ok := gcx.jsonResponse.([]byte); ok {
+					w.Write(bytes)
+				} else {
+					jsonData, err := json.Marshal(gcx.jsonResponse)
+					if err != nil {
+						return
+					}
+					w.Write(jsonData)
 				}
-				w.Write(jsonData)
+			} else if gcx.rawResponse != nil {
+				switch body := gcx.rawResponse.(type) {
+				case []byte:
+					w.Header().Set("Content-Type", "application/octet-stream")
+					w.Write(body)
+				case string:
+					w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+					w.Write([]byte(body))
+				default:
+					log.Printf("unsupported response data type： %T", gcx.rawResponse)
+				}
+			} else if gcx.rawHtml != "" {
+				w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+				w.Write([]byte(gcx.rawHtml))
 			}
-		} else if gcx.rawResponse != nil {
-			switch body := gcx.rawResponse.(type) {
-			case []byte:
-				w.Header().Set("Content-Type", "application/octet-stream")
-				w.Write(body)
-			case string:
-				w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-				w.Write([]byte(body))
-			default:
-				log.Printf("unsupported response data type： %T", gcx.rawResponse)
-			}
-		} else if gcx.rawHtml != "" {
-			w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-			w.Write([]byte(gcx.rawHtml))
-		}
-
-		return nil
+		})
 	}
+
 }

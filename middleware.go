@@ -1,15 +1,15 @@
 package golitekit
 
 import (
-	"context"
+	"net/http"
 	"slices"
 )
 
-type Middleware func(ctx context.Context, queue MiddlewareQueue) error
+type HandlerMiddleware func(http.Handler) http.Handler
 
-type MiddlewareQueue []Middleware
+type MiddlewareQueue []HandlerMiddleware
 
-func NewMiddlewareQueue(middlewares ...Middleware) MiddlewareQueue {
+func NewMiddlewareQueue(middlewares ...HandlerMiddleware) MiddlewareQueue {
 	return middlewares
 }
 
@@ -17,15 +17,13 @@ func (mq MiddlewareQueue) Clone() MiddlewareQueue {
 	return slices.Clone(mq)
 }
 
-func (mq *MiddlewareQueue) Use(middlewares ...Middleware) {
+func (mq *MiddlewareQueue) Use(middlewares ...HandlerMiddleware) {
 	*mq = append(*mq, middlewares...)
 }
 
-func (mq *MiddlewareQueue) Next(ctx context.Context) error {
-	if len(*mq) == 0 {
-		return nil
+func (mq MiddlewareQueue) Apply(handler http.Handler) http.Handler {
+	for i := len(mq) - 1; i >= 0; i-- {
+		handler = (mq)[i](handler)
 	}
-	handler := (*mq)[0]
-	*mq = (*mq)[1:]
-	return handler(ctx, *mq)
+	return handler
 }

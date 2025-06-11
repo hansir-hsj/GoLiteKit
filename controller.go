@@ -357,23 +357,23 @@ func (c *BaseController) Fatal(ctx context.Context, format string, args ...any) 
 	c.logger.Fatal(ctx, format, args...)
 }
 
-func controllerAsMiddleware(c Controller) Middleware {
-	return func(ctx context.Context, queue MiddlewareQueue) error {
-		err := c.Init(ctx)
-		if err != nil {
-			return err
-		}
-		err = c.Serve(ctx)
-		if err != nil {
-			return err
-		}
-		err = c.Finalize(ctx)
-		if err != nil {
-			return err
-		}
-		return queue.Next(ctx)
-	}
-}
+// func controllerAsMiddleware(c Controller) Middleware {
+// 	return func(ctx context.Context, queue MiddlewareQueue) error {
+// 		err := c.Init(ctx)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		err = c.Serve(ctx)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		err = c.Finalize(ctx)
+// 		if err != nil {
+// 			return err
+// 		}
+// 		return queue.Next(ctx)
+// 	}
+// }
 
 func CloneController(src Controller) Controller {
 	srcValue := reflect.ValueOf(src)
