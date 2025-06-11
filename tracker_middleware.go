@@ -1,12 +1,21 @@
 package golitekit
 
 import (
-	"context"
+	"net/http"
 )
 
-func TrackerMiddleware(ctx context.Context, queue MiddlewareQueue) error {
-	ctx = WithTracker(ctx)
-	tracker := GetTracker(ctx)
-	defer tracker.LogTracker(ctx)
-	return queue.Next(ctx)
+func TrackerMiddleware() HandlerMiddleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := WithContext(r.Context())
+			ctx = WithTracker(ctx)
+			tracker := GetTracker(ctx)
+			if tracker == nil {
+				return
+			}
+			defer tracker.LogTracker(ctx)
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }

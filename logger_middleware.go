@@ -1,25 +1,26 @@
 package golitekit
 
 import (
-	"context"
+	"net/http"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
-func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Middleware {
-	return func(ctx context.Context, queue MiddlewareQueue) error {
-		gcx := GetContext(ctx)
-		gcx.SetContextOptions(WithLogger(logInst), WithPanicLogger(panicInst))
-		logger.AddInfo(ctx, "method", gcx.request.Method)
-		logger.AddInfo(ctx, "url", gcx.request.URL)
+func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) HandlerMiddleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := WithContext(r.Context())
+			gcx := GetContext(ctx)
+			gcx.request = r
+			gcx.responseWriter = w
 
-		err := queue.Next(ctx)
-		if err != nil {
-			logInst.Warning(ctx, err.Error())
-			return err
-		}
-		logInst.Info(ctx, "ok")
+			gcx.SetContextOptions(WithLogger(logInst), WithPanicLogger(panicInst))
+			logger.AddInfo(ctx, "method", gcx.request.Method)
+			logger.AddInfo(ctx, "url", gcx.request.URL)
 
-		return nil
+			next.ServeHTTP(w, r)
+
+			logInst.Info(ctx, "ok")
+		})
 	}
 }

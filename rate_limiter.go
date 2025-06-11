@@ -1,8 +1,8 @@
 package golitekit
 
 import (
-	"context"
 	"errors"
+	"net/http"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
 
@@ -23,12 +23,15 @@ func NewRateLimiter(limit, burst int) *RateLimiter {
 	}
 }
 
-func (r *RateLimiter) RateLimiterAsMiddleware() Middleware {
-	return func(ctx context.Context, queue MiddlewareQueue) error {
-		if !r.limiter.Allow() {
-			logger.AddInfo(ctx, "rate_limited", 1)
-			return ErrRateLimited
-		}
-		return queue.Next(ctx)
+func (r *RateLimiter) RateLimiterAsMiddleware() HandlerMiddleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			ctx := req.Context()
+			if !r.limiter.Allow() {
+				logger.AddInfo(ctx, "rate_limited", 1)
+			}
+
+			next.ServeHTTP(w, req)
+		})
 	}
 }
