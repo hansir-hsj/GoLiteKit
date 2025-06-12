@@ -3,6 +3,7 @@ appName = "golitekit"
 runMode = "debug"
 network = "tcp4"
 addr = ":8080"
+enablePprof = false
 
 [HttpServer.Timeout]
 writeTimeout = 15000

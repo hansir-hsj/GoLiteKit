@@ -64,6 +64,14 @@ func New(conf string) *Server {
 		mq.Use(rateLimiter.RateLimiterAsMiddleware())
 	}
 
+	if env.EnablePprof() {
+		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/cmdline", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
+		mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
+	}
+
 	return &Server{
 		network:     env.Network(),
 		addr:        env.Addr(),
