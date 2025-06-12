@@ -5,6 +5,8 @@ appName = "{{.App}}"
 runMode = "debug"
 # 监听地址
 addr = ":8080"
+# 是否启用pprof
+enablePprof = false
 
 # 超时时间配置-毫秒
 [HttpServer.Timeout]
