@@ -17,6 +17,7 @@
         "fontobject",
         "weba",
         "webm",
-        "flac"
+        "flac",
+        "Pprof",
     ]
 }

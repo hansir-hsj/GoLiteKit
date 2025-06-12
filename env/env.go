@@ -26,7 +26,8 @@ type EnvHttpServer struct {
 	Network string `toml:"network"`
 	Addr    string `toml:"addr"`
 
-	MaxHeaderBytes int `toml:"maxHeaderBytes"`
+	MaxHeaderBytes int  `toml:"maxHeaderBytes"`
+	EnablePprof    bool `toml:"enablePprof"`
 
 	EnvTimeout   `toml:"Timeout"`
 	EnvRateLimit `toml:"RateLimit"`
@@ -205,4 +206,8 @@ func TLSKeyFile() string {
 		return ""
 	}
 	return filepath.Join(ConfDir(), defaultEnv.KeyFile)
+}
+
+func EnablePprof() bool {
+	return defaultEnv.EnablePprof
 }
