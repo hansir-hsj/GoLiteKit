@@ -26,7 +26,6 @@ type Server struct {
 
 	logger      logger.Logger
 	panicLogger *logger.PanicLogger
-	rateLimiter *RateLimiter
 
 	mq MiddlewareQueue
 
@@ -39,11 +38,6 @@ func New(conf string) *Server {
 	if err := env.Init(conf); err != nil {
 		fmt.Fprintf(os.Stderr, "env init error: %v", err)
 		return nil
-	}
-
-	var rateLimiter *RateLimiter
-	if env.RateLimit() > 0 {
-		rateLimiter = NewRateLimiter(env.RateLimit(), env.RateBurst())
 	}
 
 	logInst, err := logger.NewLogger(env.LoggerConfigFile())
@@ -60,9 +54,6 @@ func New(conf string) *Server {
 	// inner middleware
 	mq := NewMiddlewareQueue()
 	mq.Use(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware(), ContextAsMiddleware(), TimeoutMiddleware())
-	if rateLimiter != nil {
-		mq.Use(rateLimiter.RateLimiterAsMiddleware())
-	}
 
 	if env.EnablePprof() {
 		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
@@ -76,7 +67,6 @@ func New(conf string) *Server {
 		network:     env.Network(),
 		addr:        env.Addr(),
 		mux:         mux,
-		rateLimiter: rateLimiter,
 		closeChan:   make(chan struct{}),
 		mq:          mq,
 		logger:      logInst,
