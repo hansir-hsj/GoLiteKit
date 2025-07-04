@@ -7,7 +7,7 @@
 1. 基于`go 1.22 http.ServeMux`实现路由功能
 2. 实现`context`接口，用于传递请求上下文
 3. 提供`BaseController`基类，简化控制器编写
-4. 基于`slog`的日志库封装
+4. 基于官方库`slog`的日志库封装
     - 支持日志分级和自定义格式
     - 支持AddXXX方法
     - 使用context传递Field，可以在多个goroutine间使用

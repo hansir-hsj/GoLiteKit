@@ -7,7 +7,7 @@ A concise and lightweight Go language framework for rapid development of web app
 1. Implement routing function based on 'go 1.22 http.ServeMux'
 2. Implement the `context` interface to pass request context.
 3. Provide a `BaseController` base class to simplify controller development.
-4. Encapsulate a logging library based on `slog`:
+4. Encapsulate a logging library based on official library `slog`:
     - Support log levels and custom log formats.
     - Support `AddXXX` methods.
     - Use `context` to pass `Field`, which can be used across multiple goroutines.
