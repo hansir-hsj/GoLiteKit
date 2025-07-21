@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -17,7 +18,7 @@ func TimeoutMiddleware() HandlerMiddleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			ctx, cancel := context.WithTimeout(ctx, timeout)
+			ctx, cancel := context.WithTimeoutCause(ctx, timeout, fmt.Errorf("request timeout after %v", timeout))
 			defer cancel()
 
 			doneChan := make(chan struct{}, 1)
@@ -59,7 +60,8 @@ func TimeoutMiddleware() HandlerMiddleware {
 			case p := <-panicChan:
 				log.Printf("%v", p)
 			case <-ctx.Done():
-				log.Print("timeout")
+				cause := context.Cause(ctx)
+				log.Printf("request canceled: %v", cause)
 			case <-doneChan:
 				return
 			}
