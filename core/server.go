@@ -1,4 +1,4 @@
-package golitekit
+package core
 
 import (
 	"context"

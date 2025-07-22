@@ -1,4 +1,4 @@
-package golitekit
+package core
 
 const (
 	OK = 0
