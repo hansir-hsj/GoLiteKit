@@ -11,6 +11,9 @@ readTimeout = 200
 idleTimeout = 5000
 shutdownTimeout = 5000
 
+[HttpServer.SSE]
+timeout = 300000
+
 [HttpServer.RateLimit]
 rateLimit = 100
 rateBurst = 150

@@ -1,4 +1,4 @@
-package core
+package golitekit
 
 import (
 	"context"
@@ -14,6 +14,12 @@ func TimeoutMiddleware() HandlerMiddleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 			timeout := env.WriteTimeout()
+			if env.SSETimeout() > 0 {
+				if r.Header.Get("Accept") == "text/event-stream" {
+					timeout = env.SSETimeout()
+				}
+			}
+
 			if timeout < 1 {
 				next.ServeHTTP(w, r)
 				return
