@@ -35,6 +35,7 @@ type EnvHttpServer struct {
 	EnvDB        `toml:"DB"`
 	EnvRedis     `toml:"Redis"`
 	EnvTLSConfig `toml:"TLSConfig"`
+	EnvSSE       `toml:"SSE"`
 }
 
 type EnvTimeout struct {
@@ -66,6 +67,10 @@ type EnvTLSConfig struct {
 	TLS      bool   `toml:"tls"`
 	CertFile string `toml:"certFile"`
 	KeyFile  string `toml:"keyFile"`
+}
+
+type EnvSSE struct {
+	Timeout int `toml:"timeout"`
 }
 
 type Env struct {
@@ -210,4 +215,11 @@ func TLSKeyFile() string {
 
 func EnablePprof() bool {
 	return defaultEnv.EnablePprof
+}
+
+func SSETimeout() time.Duration {
+	if defaultEnv.Timeout == 0 {
+		return 300 * time.Second
+	}
+	return time.Duration(defaultEnv.Timeout) * time.Millisecond
 }

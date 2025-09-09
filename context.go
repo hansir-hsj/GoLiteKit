@@ -1,10 +1,12 @@
-package core
+package golitekit
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -28,8 +30,29 @@ type Context struct {
 	jsonResponse any
 	rawHtml      string
 
+	sseWriter *SSEWriter
+
 	data     map[string]any
 	dataLock sync.Mutex
+}
+
+type SSEvent struct {
+	Event string `json:"event,omitempty"`
+	Data  any    `json:"data"`
+	ID    string `json:"id,omitempty"`
+	Retry int    `json:"retry,omitempty"`
+}
+
+type SSEWriter struct {
+	w http.ResponseWriter
+}
+
+func NewSSEWriter(w http.ResponseWriter) *SSEWriter {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	return &SSEWriter{w: w}
 }
 
 func GetContext(ctx context.Context) *Context {
@@ -168,4 +191,76 @@ func ContextAsMiddleware() HandlerMiddleware {
 		})
 	}
 
+}
+
+func (sse *SSEWriter) Send(event SSEvent) error {
+	if event.ID != "" {
+		if _, err := fmt.Fprintf(sse.w, "id: %s\n", sse.sanitize(event.ID)); err != nil {
+			return err
+		}
+	}
+
+	if event.Event != "" {
+		if _, err := fmt.Fprintf(sse.w, "event: %s\n", sse.sanitize(event.Event)); err != nil {
+			return err
+		}
+	}
+
+	if event.Retry > 0 {
+		if _, err := fmt.Fprintf(sse.w, "retry: %d\n", event.Retry); err != nil {
+			return err
+		}
+	}
+
+	data, err := sse.serializeData(event.Data)
+	if err != nil {
+		return err
+	}
+
+	lines := strings.Split(data, "\n")
+	for _, line := range lines {
+		if _, err := fmt.Fprintf(sse.w, "data: %s\n", sse.sanitize(line)); err != nil {
+			return err
+		}
+	}
+
+	if _, err := fmt.Fprintf(sse.w, "\n"); err != nil {
+		return err
+	}
+
+	sse.w.(http.Flusher).Flush()
+
+	return nil
+}
+
+func (sse *SSEWriter) sanitize(data string) string {
+	data = strings.ReplaceAll(data, "\r", "")
+	data = strings.ReplaceAll(data, "\n", "")
+	return data
+}
+
+func (sse *SSEWriter) serializeData(data any) (string, error) {
+	switch v := data.(type) {
+	case string:
+		return v, nil
+	case []byte:
+		return string(v), nil
+	default:
+		jsonData, err := json.Marshal(v)
+		if err != nil {
+			return "", err
+		}
+		return string(jsonData), nil
+	}
+}
+
+func (ctx *Context) SSEWriter() *SSEWriter {
+	if ctx.sseWriter == nil {
+		ctx.sseWriter = NewSSEWriter(ctx.responseWriter)
+	}
+	return ctx.sseWriter
+}
+
+func (ctx *Context) ServeSSE() *SSEWriter {
+	return ctx.SSEWriter()
 }

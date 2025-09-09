@@ -1,4 +1,4 @@
-package core
+package golitekit
 
 import (
 	"bytes"
@@ -115,6 +115,14 @@ func (c *BaseController) ServeJSON(data any) error {
 	}
 	c.gcx.ServeJSON(jsonData)
 	return nil
+}
+
+func (c *BaseController) ServeHTML(html string) {
+	c.gcx.ServeHTML(html)
+}
+
+func (c *BaseController) ServeSSE() *SSEWriter {
+	return c.gcx.SSEWriter()
 }
 
 func (c *BaseController) QueryInt(key string, def int) int {
@@ -357,23 +365,20 @@ func (c *BaseController) Fatal(ctx context.Context, format string, args ...any) 
 	c.logger.Fatal(ctx, format, args...)
 }
 
-// func controllerAsMiddleware(c Controller) Middleware {
-// 	return func(ctx context.Context, queue MiddlewareQueue) error {
-// 		err := c.Init(ctx)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		err = c.Serve(ctx)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		err = c.Finalize(ctx)
-// 		if err != nil {
-// 			return err
-// 		}
-// 		return queue.Next(ctx)
-// 	}
-// }
+func (c *BaseController) SendSSE(event SSEvent) error {
+	return c.gcx.SSEWriter().Send(event)
+}
+
+func (c *BaseController) SendSSEData(data interface{}) error {
+	return c.SendSSE(SSEvent{Data: data})
+}
+
+func (c *BaseController) SendSSEEvent(eventType string, data interface{}) error {
+	return c.SendSSE(SSEvent{
+		Event: eventType,
+		Data:  data,
+	})
+}
 
 func CloneController(src Controller) Controller {
 	srcValue := reflect.ValueOf(src)
