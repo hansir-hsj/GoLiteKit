@@ -22,6 +22,7 @@ type ContextOption func(*Context)
 
 type Context struct {
 	request        *http.Request
+	RawBody        []byte
 	responseWriter http.ResponseWriter
 	logger         logger.Logger
 	panicLogger    *logger.PanicLogger

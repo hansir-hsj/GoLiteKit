@@ -29,6 +29,8 @@ type Controller interface {
 	RequestSizeLimiter
 
 	Init(ctx context.Context) error
+	SanityCheck(ctx context.Context) error
+	ParseRequest(ctx context.Context, body []byte) error
 	Serve(ctx context.Context) error
 	Finalize(ctx context.Context) error
 }
@@ -56,6 +58,14 @@ func (c *BaseController) Init(ctx context.Context) error {
 	c.logger = c.gcx.logger
 	c.parseBody()
 
+	return nil
+}
+
+func (c *BaseController) SanityCheck(ctx context.Context) error {
+	return nil
+}
+
+func (c *BaseController) ParseRequest(ctx context.Context, body []byte) error {
 	return nil
 }
 
@@ -92,7 +102,8 @@ func (c *BaseController) parseBody() error {
 		if httpReq.Body != nil {
 			originBody := httpReq.Body
 			// capable of reading data multiple times
-			c.rawBody, err = io.ReadAll(originBody)
+			rawBody, err := io.ReadAll(originBody)
+			c.gcx.RawBody = rawBody
 			if err != nil {
 				return err
 			}

@@ -178,6 +178,15 @@ func (s *Server) registerHandler(method, path string, controller Controller) {
 			if err != nil {
 				return
 			}
+			err = cloned.SanityCheck(ctx)
+			if err != nil {
+				return
+			}
+			err = cloned.ParseRequest(ctx, gcx.RawBody)
+			if err != nil {
+				return
+			}
+
 			err = cloned.Serve(ctx)
 			if err != nil {
 				return
