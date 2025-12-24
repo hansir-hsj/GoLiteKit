@@ -10,11 +10,13 @@ type Response struct {
 	Data   any    `json:"data,omitempty"`
 }
 
-type RestController struct {
-	BaseController
+// RestController is a RESTful API style generic controller
+// T is the request body type, which can be a concrete structure or NoBody
+type RestController[T any] struct {
+	BaseController[T]
 }
 
-func (c *RestController) ServeData(data any) {
+func (c *RestController[T]) ServeData(data any) {
 	res := Response{
 		Status: OK,
 		Msg:    "OK",
@@ -22,3 +24,7 @@ func (c *RestController) ServeData(data any) {
 	}
 	c.BaseController.ServeJSON(res)
 }
+
+// RestVNet Controller is a convenient alias for REST Controllers without request bodies
+// Suitable for headless RESTful interfaces such as GET, DELETE, etc
+type RestGetController = RestController[NoBody]
