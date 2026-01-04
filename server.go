@@ -20,9 +20,10 @@ type Server struct {
 	network string
 	addr    string
 
-	mux        *http.ServeMux
-	listener   net.Listener
-	httpServer http.Server
+	mux            *http.ServeMux
+	methodHandlers map[string]map[string]http.Handler // path -> method -> handler
+	listener       net.Listener
+	httpServer     http.Server
 
 	logger      logger.Logger
 	panicLogger *logger.PanicLogger
@@ -159,12 +160,35 @@ func (s *Server) OnDelete(path string, controller Controller) {
 }
 
 func (s *Server) registerHandler(method, path string, controller Controller) {
-	handler := func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != method {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
+	// 初始化 methodHandlers map
+	if s.methodHandlers == nil {
+		s.methodHandlers = make(map[string]map[string]http.Handler)
+	}
 
+	// 创建当前 method 的 handler
+	handler := s.createControllerHandler(controller)
+
+	// 检查该 path 是否已注册
+	if s.methodHandlers[path] == nil {
+		s.methodHandlers[path] = make(map[string]http.Handler)
+
+		// 首次注册：向 mux 注册统一分发器
+		s.mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+			if h, ok := s.methodHandlers[path][r.Method]; ok {
+				h.ServeHTTP(w, r)
+			} else {
+				http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+			}
+		})
+	}
+
+	// 将 handler 存入对应 method
+	s.methodHandlers[path][method] = handler
+}
+
+// createControllerHandler 封装 controller 处理逻辑，返回 http.Handler
+func (s *Server) createControllerHandler(controller Controller) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := WithContext(r.Context())
 		ctx = logger.WithLoggerContext(ctx)
 		r = r.WithContext(ctx)
@@ -199,9 +223,7 @@ func (s *Server) registerHandler(method, path string, controller Controller) {
 
 		wrappedHandler := s.mq.Apply(controllerHandler)
 		wrappedHandler.ServeHTTP(w, r)
-	}
-
-	s.mux.HandleFunc(path, handler)
+	})
 }
 
 func (s *Server) ServeFile(path, realPath string) {
