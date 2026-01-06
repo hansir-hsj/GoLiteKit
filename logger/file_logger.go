@@ -33,6 +33,7 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 	if err != nil {
 		return nil, fmt.Errorf("failed to create log directory %s: %w", logConf.Dir, err)
 	}
+
 	filePath := logConf.LogFileName()
 	target, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 	if err != nil {
@@ -42,12 +43,11 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 	handler := newContextHandler(target, logConf.Format, opts)
 
 	return &FileLogger{
-		logConf:    logConf,
-		opts:       opts,
-		filePath:   filePath,
-		logger:     slog.New(handler),
-		file:       target,
-		LastRotate: time.Now(),
+		logConf:  logConf,
+		opts:     opts,
+		filePath: filePath,
+		logger:   slog.New(handler),
+		file:     target,
 	}, nil
 }
 
@@ -55,19 +55,28 @@ func (l *FileLogger) NeedRotate() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.lines >= l.logConf.MaxLines {
+	now := time.Now()
+	last := l.LastRotate
+
+	if last.IsZero() {
 		return true
 	}
 
-	fi, err := l.file.Stat()
-	if err != nil {
+	switch l.logConf.RotateRule {
+	case "no":
 		return false
-	}
-	if fi.Size() >= l.logConf.MaxSize {
-		return true
-	}
-	if time.Since(l.LastRotate) >= l.logConf.MaxAge {
-		return true
+	case "1min":
+		return truncateToMinute(last) != truncateToMinute(now)
+	case "5min":
+		return truncateToMinuteInterval(last, 5) != truncateToMinuteInterval(now, 5)
+	case "10min":
+		return truncateToMinuteInterval(last, 10) != truncateToMinuteInterval(now, 10)
+	case "30min":
+		return truncateToMinuteInterval(last, 30) != truncateToMinuteInterval(now, 30)
+	case "1hour":
+		return truncateToHour(last) != truncateToHour(now)
+	case "1day":
+		return truncateToDay(last) != truncateToDay(now)
 	}
 
 	return false
@@ -97,21 +106,26 @@ func (l *FileLogger) Rotate() error {
 }
 
 func (l *FileLogger) NewFilePath(filePath string) string {
-	since := time.Since(l.LastRotate)
 	now := time.Now()
-	if since > 24*time.Hour {
-		return filePath + "." + now.Format("20060102")
-	}
-	if since > time.Hour {
-		return filePath + "." + now.Format("20060102-15")
-	}
-	if since > 10*time.Minute {
-		minute := now.Minute()
-		minuteMod := minute % 10
-		return filePath + "." + fmt.Sprintf("%s-%02d", now.Format("20060102-15"), minuteMod)
+
+	switch l.logConf.RotateRule {
+	case "no":
+		return filePath
+	case "1min":
+		return filePath + "." + truncateToMinute(now).Format("20060102140405")
+	case "5min":
+		return filePath + "." + truncateToMinuteInterval(now, 5).Format("20060102140405")
+	case "10min":
+		return filePath + "." + truncateToMinuteInterval(now, 10).Format("20060102140405")
+	case "30min":
+		return filePath + "." + truncateToMinuteInterval(now, 30).Format("20060102140405")
+	case "1hour":
+		return filePath + "." + truncateToHour(now).Format("2006010214")
+	case "1day":
+		return filePath + "." + truncateToDay(now).Format("20060102")
 	}
 
-	return filePath + "." + time.Now().Format("20060102-150405")
+	return filePath
 }
 
 func (l *FileLogger) Debug(ctx context.Context, format string, args ...any) {
