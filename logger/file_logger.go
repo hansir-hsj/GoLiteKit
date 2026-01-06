@@ -112,15 +112,15 @@ func (l *FileLogger) NewFilePath(filePath string) string {
 	case "no":
 		return filePath
 	case "1min":
-		return filePath + "." + truncateToMinute(now).Format("20060102140405")
+		return filePath + "." + truncateToMinute(now).Format("20060102150405")
 	case "5min":
-		return filePath + "." + truncateToMinuteInterval(now, 5).Format("20060102140405")
+		return filePath + "." + truncateToMinuteInterval(now, 5).Format("20060102150405")
 	case "10min":
-		return filePath + "." + truncateToMinuteInterval(now, 10).Format("20060102140405")
+		return filePath + "." + truncateToMinuteInterval(now, 10).Format("20060102150405")
 	case "30min":
-		return filePath + "." + truncateToMinuteInterval(now, 30).Format("20060102140405")
+		return filePath + "." + truncateToMinuteInterval(now, 30).Format("20060102150405")
 	case "1hour":
-		return filePath + "." + truncateToHour(now).Format("2006010214")
+		return filePath + "." + truncateToHour(now).Format("2006010215")
 	case "1day":
 		return filePath + "." + truncateToDay(now).Format("20060102")
 	}
