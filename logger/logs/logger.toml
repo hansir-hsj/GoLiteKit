@@ -1,6 +1,26 @@
 [logger]
+# log directory
 dir = "logs"
+# log filename
 filename = "test.log"
+# log level
 level = "trace"
+# format of log. the options avaiable are "text" and "json"
 format = "text"
+# maximum number of lines
 maxLines = 10000
+
+# log segmentation rule, optional parameter, default is 1hour
+# the optional values and the file extensions for segmentation are as follows：
+# 1hour -> .2020072714
+# no
+# 1day -> .20200727
+# 1min -> .202007271452
+# 5min -> .202007271450
+# 10min -> .202007271450
+# 30min -> .202007271430
+rotateRule = "1hour"
+
+# number of retained log files, optional parameter
+# default is 48. if it is -1, the log file will not be cleared
+maxFileNum = 48

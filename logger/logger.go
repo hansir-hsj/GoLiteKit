@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/config"
 )
@@ -55,9 +54,8 @@ type LoggerConfig struct {
 	Format   string `toml:"format"`
 
 	// Rotator 相关
-	MaxAge   time.Duration `toml:"maxAge"`
-	MaxSize  int64         `toml:"maxSize"`
-	MaxLines int64         `toml:"maxLines"`
+	RotateRule string `toml:"rotateRule"`
+	MaxFileNum int    `toml:"maxFileNum"`
 }
 
 type Config struct {
@@ -78,14 +76,17 @@ func parse(conf string) (*Config, error) {
 	}
 	lConfig.Dir = absDir
 
-	if lConfig.MaxAge <= 30*time.Minute {
-		lConfig.MaxAge = 30 * time.Minute
+	if lConfig.RotateRule == "" {
+		lConfig.RotateRule = "1hour"
 	}
-	if lConfig.MaxLines <= 10000 {
-		lConfig.MaxLines = 10000
+	switch lConfig.RotateRule {
+	case "1hour", "1day", "1min", "5min", "10min", "30min", "no":
+		break
+	default:
+		return nil, fmt.Errorf("invalid rotate rule: %s", lConfig.RotateRule)
 	}
-	if lConfig.MaxSize <= 10*1<<20 {
-		lConfig.MaxSize = 10 * 1 << 20
+	if lConfig.MaxFileNum == 0 {
+		lConfig.MaxFileNum = 48
 	}
 
 	return &lConfig, nil
