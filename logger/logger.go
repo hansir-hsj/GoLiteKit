@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/config"
 )
@@ -26,11 +27,13 @@ const (
 )
 
 type Logger interface {
-	Debug(ctx context.Context, format string, args ...any)
-	Trace(ctx context.Context, format string, args ...any)
-	Info(ctx context.Context, format string, args ...any)
-	Warning(ctx context.Context, format string, args ...any)
-	Fatal(ctx context.Context, format string, args ...any)
+	Debug(ctx context.Context, msg string, args ...any)
+	Trace(ctx context.Context, msg string, args ...any)
+	Info(ctx context.Context, msg string, args ...any)
+	Warning(ctx context.Context, msg string, args ...any)
+	Error(ctx context.Context, msg string, args ...any)
+	Fatal(ctx context.Context, msg string, args ...any)
+	Close() error
 }
 
 var LevelNames = map[slog.Leveler]string{
@@ -107,8 +110,15 @@ func NewLogger(loggerConfig ...string) (Logger, error) {
 	opts := &slog.HandlerOptions{
 		Level:     LevelDebug,
 		AddSource: false,
-		// 自定义日志级别
+		// 自定义日志级别和时间格式
 		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
+			// 自定义时间格式
+			if attr.Key == slog.TimeKey {
+				if t, ok := attr.Value.Any().(time.Time); ok {
+					attr.Value = slog.StringValue(t.Format("2006-01-02 15:04:05.000"))
+				}
+			}
+			// 自定义日志级别
 			if attr.Key == slog.LevelKey {
 				level := attr.Value.Any().(slog.Level)
 				levelLabel, exists := LevelNames[level]
