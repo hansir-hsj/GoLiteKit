@@ -4,32 +4,39 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"runtime"
-	"time"
 )
 
 type ConsoleLogger struct {
 	logger *slog.Logger
 }
 
-func (l *ConsoleLogger) Debug(ctx context.Context, format string, args ...any) {
-	l.logit(ctx, LevelDebug, format, args...)
+func (l *ConsoleLogger) Debug(ctx context.Context, msg string, args ...any) {
+	l.logit(ctx, LevelDebug, msg, args...)
 }
 
-func (l *ConsoleLogger) Trace(ctx context.Context, format string, args ...any) {
-	l.logit(ctx, LevelTrace, format, args...)
+func (l *ConsoleLogger) Trace(ctx context.Context, msg string, args ...any) {
+	l.logit(ctx, LevelTrace, msg, args...)
 }
 
-func (l *ConsoleLogger) Info(ctx context.Context, format string, args ...any) {
-	l.logit(ctx, LevelInfo, format, args...)
+func (l *ConsoleLogger) Info(ctx context.Context, msg string, args ...any) {
+	l.logit(ctx, LevelInfo, msg, args...)
 }
 
-func (l *ConsoleLogger) Warning(ctx context.Context, format string, args ...any) {
-	l.logit(ctx, LevelWarning, format, args...)
+func (l *ConsoleLogger) Warning(ctx context.Context, msg string, args ...any) {
+	l.logit(ctx, LevelWarning, msg, args...)
 }
 
-func (l *ConsoleLogger) Fatal(ctx context.Context, format string, args ...any) {
-	l.logit(ctx, LevelFatal, format, args...)
+func (l *ConsoleLogger) Error(ctx context.Context, msg string, args ...any) {
+	l.logit(ctx, LevelError, msg, args...)
+}
+
+func (l *ConsoleLogger) Fatal(ctx context.Context, msg string, args ...any) {
+	l.logit(ctx, LevelFatal, msg, args...)
+}
+
+func (l *ConsoleLogger) Close() error {
+	// ConsoleLogger 输出到 stdout，无需关闭
+	return nil
 }
 
 func (l *ConsoleLogger) logit(ctx context.Context, level slog.Level, format string, args ...any) {
@@ -48,16 +55,6 @@ func (l *ConsoleLogger) log(ctx context.Context, level slog.Level, msg string, a
 	if !l.logger.Enabled(ctx, level) {
 		return
 	}
-	var pc uintptr
-	var pcs [1]uintptr
-	// skip [runtime.Callers, this function, this function's caller]
-	// NOTE: 这里修改 skip 为 4，*slog.Logger.log 源码中 skip 为 3
-	runtime.Callers(4, pcs[:])
-	pc = pcs[0]
-	r := slog.NewRecord(time.Now(), level, msg, pc)
-	r.Add(args...)
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	_ = l.logger.Handler().Handle(ctx, r)
+	// callerSkip=5: logRecord -> log -> logit -> Debug/Info/... -> user code
+	_ = logRecord(ctx, l.logger.Handler(), level, msg, 5, args...)
 }

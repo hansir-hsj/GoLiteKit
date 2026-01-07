@@ -130,7 +130,9 @@ func addLog(ctx context.Context, level slog.Level, key string, value any) {
 	lcx := ctx.Value(loggerKey)
 	logCtx, ok := lcx.(*LoggerContext)
 	if !ok {
-		panic("LoggerContext not init, please call WithLoggerContext first")
+		// 静默失败，避免生产环境 panic
+		// 如需调试，可检查 ctx 是否通过 WithLoggerContext 初始化
+		return
 	}
 	logCtx.add(key, value, level)
 }
