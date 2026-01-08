@@ -52,7 +52,9 @@ type EnvRateLimit struct {
 }
 
 type EnvLogger struct {
-	Logger string `toml:"configFile"`
+	Logger          string `toml:"configFile"`
+	LogRequestBody  bool   `toml:"logRequestBody"`
+	LogResponseBody bool   `toml:"logResponseBody"`
 }
 
 type EnvDB struct {
@@ -222,4 +224,12 @@ func SSETimeout() time.Duration {
 		return 300 * time.Second
 	}
 	return time.Duration(defaultEnv.Timeout) * time.Millisecond
+}
+
+func LogRequestBody() bool {
+	return defaultEnv.LogRequestBody
+}
+
+func LogResponseBody() bool {
+	return defaultEnv.LogResponseBody
 }
