@@ -20,6 +20,8 @@ rateBurst = 150
 
 [HttpServer.Logger]
 configFile = "logger.toml"
+logRequestBody = true    # 开启请求体打印（可选）
+logResponseBody = false  # 关闭响应体打印（可选）
 
 [HttpServer.DB]
 configFile = "db.toml"
