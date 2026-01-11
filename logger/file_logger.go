@@ -34,6 +34,14 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 	}
 
 	filePath := logConf.LogFileName()
+
+	// 检查已存在的日志文件是否需要在打开前轮转
+	// 如果文件修改时间属于上一个时间周期，先执行轮转
+	if err := rotateExistingFileIfNeeded(filePath, logConf); err != nil {
+		// 轮转失败不影响正常日志功能，仅打印警告
+		fmt.Fprintf(os.Stderr, "warning: failed to rotate existing log file: %v\n", err)
+	}
+
 	target, err := os.OpenFile(filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
 	if err != nil {
 		return nil, err
@@ -47,8 +55,71 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 		filePath:   filePath,
 		logger:     slog.New(handler),
 		file:       target,
-		LastRotate: time.Now(), // 初始化为当前时间，避免创建后立即轮转
+		LastRotate: time.Now(), // 初始化为当前时间
 	}, nil
+}
+
+// rotateExistingFileIfNeeded 检查并轮转已存在的旧日志文件
+// 当服务重启时，如果旧日志文件的修改时间属于上一个时间周期，需要先归档
+func rotateExistingFileIfNeeded(filePath string, logConf *Config) error {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // 文件不存在，无需轮转
+		}
+		return err
+	}
+
+	if info.Size() == 0 {
+		return nil // 文件为空，无需轮转
+	}
+
+	modTime := info.ModTime()
+	now := time.Now()
+
+	needRotate := false
+	switch logConf.RotateRule {
+	case "no":
+		needRotate = false
+	case "1min":
+		needRotate = truncateToMinute(modTime) != truncateToMinute(now)
+	case "5min":
+		needRotate = truncateToMinuteInterval(modTime, 5) != truncateToMinuteInterval(now, 5)
+	case "10min":
+		needRotate = truncateToMinuteInterval(modTime, 10) != truncateToMinuteInterval(now, 10)
+	case "30min":
+		needRotate = truncateToMinuteInterval(modTime, 30) != truncateToMinuteInterval(now, 30)
+	case "1hour":
+		needRotate = truncateToHour(modTime) != truncateToHour(now)
+	case "1day":
+		needRotate = truncateToDay(modTime) != truncateToDay(now)
+	}
+
+	if !needRotate {
+		return nil
+	}
+
+	// 根据文件修改时间生成归档文件名
+	var newFilePath string
+	switch logConf.RotateRule {
+	case "1min":
+		newFilePath = filePath + "." + truncateToMinute(modTime).Format("20060102150405")
+	case "5min":
+		newFilePath = filePath + "." + truncateToMinuteInterval(modTime, 5).Format("20060102150405")
+	case "10min":
+		newFilePath = filePath + "." + truncateToMinuteInterval(modTime, 10).Format("20060102150405")
+	case "30min":
+		newFilePath = filePath + "." + truncateToMinuteInterval(modTime, 30).Format("20060102150405")
+	case "1hour":
+		newFilePath = filePath + "." + truncateToHour(modTime).Format("2006010215")
+	case "1day":
+		newFilePath = filePath + "." + truncateToDay(modTime).Format("20060102")
+	default:
+		return nil
+	}
+
+	// 执行轮转：重命名旧文件
+	return os.Rename(filePath, newFilePath)
 }
 
 // needRotate checks if rotation is needed (internal, no lock)
