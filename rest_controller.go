@@ -27,7 +27,7 @@ func (c *RestController[T]) ServeData(data any) {
 
 func (c *RestController[T]) ServeError(errMsg string) {
 	res := Response{
-		Status: OK,
+		Status: -1,
 		Msg:    errMsg,
 	}
 	c.BaseController.ServeJSON(res)
