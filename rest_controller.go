@@ -25,6 +25,14 @@ func (c *RestController[T]) ServeData(data any) {
 	c.BaseController.ServeJSON(res)
 }
 
+func (c *RestController[T]) ServeError(err error) {
+	res := Response{
+		Status: OK,
+		Msg:    err.Error(),
+	}
+	c.BaseController.ServeJSON(res)
+}
+
 // RestVNet Controller is a convenient alias for REST Controllers without request bodies
 // Suitable for headless RESTful interfaces such as GET, DELETE, etc
 type RestGetController = RestController[NoBody]
