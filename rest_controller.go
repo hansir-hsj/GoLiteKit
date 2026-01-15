@@ -25,10 +25,10 @@ func (c *RestController[T]) ServeData(data any) {
 	c.BaseController.ServeJSON(res)
 }
 
-func (c *RestController[T]) ServeError(err error) {
+func (c *RestController[T]) ServeError(errMsg string) {
 	res := Response{
 		Status: OK,
-		Msg:    err.Error(),
+		Msg:    errMsg,
 	}
 	c.BaseController.ServeJSON(res)
 }
