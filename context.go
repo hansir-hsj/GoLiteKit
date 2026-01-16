@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,6 +13,8 @@ import (
 
 const (
 	globalContextKey ContextKey = iota
+	errorContextKey
+	AppErrorKey = "__app_error__"
 )
 
 type ContextKey int
@@ -96,6 +97,40 @@ func GetContextData(ctx context.Context, key string) (any, bool) {
 	return nil, false
 }
 
+func SetError(ctx context.Context, err *AppError) {
+	gcx := GetContext(ctx)
+	if gcx != nil {
+		gcx.dataLock.Lock()
+		defer gcx.dataLock.Unlock()
+		gcx.data[AppErrorKey] = err
+	}
+}
+
+func GetError(ctx context.Context) *AppError {
+	gcx := GetContext(ctx)
+	if gcx != nil {
+		gcx.dataLock.Lock()
+		defer gcx.dataLock.Unlock()
+		if v, ok := gcx.data[AppErrorKey]; ok {
+			return v.(*AppError)
+		}
+	}
+	return nil
+}
+
+func HasError(ctx context.Context) bool {
+	return GetError(ctx) != nil
+}
+
+func CLearError(ctx context.Context) {
+	gcx := GetContext(ctx)
+	if gcx != nil {
+		gcx.dataLock.Lock()
+		defer gcx.dataLock.Unlock()
+		delete(gcx.data, AppErrorKey)
+	}
+}
+
 func (gcx *Context) SetContextOptions(opts ...ContextOption) *Context {
 	for _, opt := range opts {
 		opt(gcx)
@@ -158,10 +193,19 @@ func (ctx *Context) ServeHTML(html string) {
 func ContextAsMiddleware() HandlerMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// execute handler chain
 			next.ServeHTTP(w, r)
 
 			ctx := r.Context()
 			gcx := GetContext(ctx)
+			if gcx == nil {
+				return
+			}
+
+			// if there are errors, do not write response, handle by ErrorHandlerMiddleware
+			if HasError(ctx) {
+				return
+			}
 
 			if gcx.jsonResponse != nil {
 				w.Header().Set("Content-Type", "application/json")
@@ -170,7 +214,7 @@ func ContextAsMiddleware() HandlerMiddleware {
 				} else {
 					jsonData, err := json.Marshal(gcx.jsonResponse)
 					if err != nil {
-						return
+						SetError(ctx, ErrInternal("Failed to marshal JSON response", err))
 					}
 					w.Write(jsonData)
 				}
@@ -183,7 +227,7 @@ func ContextAsMiddleware() HandlerMiddleware {
 					w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
 					w.Write([]byte(body))
 				default:
-					log.Printf("unsupported response data type： %T", gcx.rawResponse)
+					SetError(ctx, ErrInternal("Unsupported response type", nil))
 				}
 			} else if gcx.rawHtml != "" {
 				w.Header().Set("Content-Type", "text/html; charset=UTF-8")

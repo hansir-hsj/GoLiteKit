@@ -54,7 +54,20 @@ func New(conf string) *Server {
 
 	// inner middleware
 	mq := NewMiddlewareQueue()
-	mq.Use(LoggerAsMiddleware(logInst, panicLogger), TrackerMiddleware(), ContextAsMiddleware(), TimeoutMiddleware())
+	// Execute sequence: ErrorHandler → Logger → Tracker → Timeout → Context → Controller
+	mq.Use(
+		ErrorHandlerMiddleware(
+			WithErrorCallback(func(r *http.Request, err *AppError) {
+				logInst.Warning(r.Context(), "request error: %d %s", err.Code, err.Message)
+			}),
+			WithPanicCallback(func(r *http.Request, recovered any) {
+			}),
+		),
+		LoggerAsMiddleware(logInst, panicLogger),
+		TrackerMiddleware(),
+		TimeoutMiddleware(),
+		ContextAsMiddleware(),
+	)
 
 	if env.EnablePprof() {
 		mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)

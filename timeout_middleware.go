@@ -3,7 +3,6 @@ package golitekit
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/hansir-hsj/GoLiteKit/env"
@@ -12,62 +11,49 @@ import (
 func TimeoutMiddleware() HandlerMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
 			timeout := env.WriteTimeout()
-			if env.SSETimeout() > 0 {
-				if r.Header.Get("Accept") == "text/event-stream" {
-					timeout = env.SSETimeout()
-				}
+
+			if env.SSETimeout() > 0 && r.Header.Get("Accept") == "text/event-stream" {
+				timeout = env.SSETimeout()
 			}
 
 			if timeout < 1 {
 				next.ServeHTTP(w, r)
 				return
 			}
-			ctx, cancel := context.WithTimeoutCause(ctx, timeout, fmt.Errorf("request timeout after %v", timeout))
+
+			ctx, cancel := context.WithTimeoutCause(
+				r.Context(),
+				timeout,
+				fmt.Errorf("request timeout after %v", timeout),
+			)
 			defer cancel()
+
+			// use thread-safe ResponseWriter
+			tw := newTimeoutResponseWriter(w)
 
 			doneChan := make(chan struct{}, 1)
 			panicChan := make(chan any, 1)
-			defer close(doneChan)
-			defer close(panicChan)
 
 			go func() {
 				defer func() {
 					if p := recover(); p != nil {
-						gcx := GetContext(ctx)
-						gcx.PanicLogger().Report(ctx, p)
-						if err := ctx.Err(); err != nil {
-							if err != context.Canceled {
-								return
-							}
-						}
 						panicChan <- p
 					}
 				}()
 
-				select {
-				case <-ctx.Done():
-					return
-				default:
-					next.ServeHTTP(w, r)
-				}
-
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				doneChan <- struct{}{}
+				next.ServeHTTP(tw, r.WithContext(ctx))
+				close(doneChan)
 			}()
 
 			select {
 			case p := <-panicChan:
-				log.Printf("%v", p)
+				// panic again, let outer ErrorHandlerMiddleware handle it
+				panic(p)
 			case <-ctx.Done():
+				tw.markTimeout()
 				cause := context.Cause(ctx)
-				log.Printf("request canceled: %v", cause)
+				SetError(r.Context(), ErrTimeout(fmt.Sprintf("Request timeout: %v", cause)))
 			case <-doneChan:
 				return
 			}

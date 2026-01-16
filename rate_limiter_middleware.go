@@ -7,7 +7,7 @@ func (r *RateLimiter) RateLimiterAsMiddleware(keyFunc func(r *http.Request) stri
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if r.enableGlobal && r.globalLimiter != nil {
 				if !r.globalLimiter.Allow() {
-					http.Error(w, "Too many requests", http.StatusTooManyRequests)
+					SetError(req.Context(), ErrTooManyRequests("Global rate limit exceeded"))
 					return
 				}
 			}
@@ -17,7 +17,7 @@ func (r *RateLimiter) RateLimiterAsMiddleware(keyFunc func(r *http.Request) stri
 				limiter := r.GetLimiter(key)
 
 				if !limiter.Allow() {
-					http.Error(w, "Too many requests", http.StatusTooManyRequests)
+					SetError(req.Context(), ErrTooManyRequests("Rate limit exceeded"))
 					return
 				}
 			}

@@ -197,6 +197,50 @@ func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) err
 	return nil
 }
 
+func (c *BaseController[T]) SetError(ctx context.Context, err *AppError) {
+	SetError(ctx, err)
+}
+
+// 400
+func (c *BaseController[T]) SetBadRequest(ctx context.Context, msg string, internal error) {
+	SetError(ctx, ErrBadRequest(msg, internal))
+}
+
+// 401
+func (c *BaseController[T]) SetUnauthorized(ctx context.Context, msg string) {
+	SetError(ctx, ErrUnauthorized(msg))
+}
+
+// 403
+func (c *BaseController[T]) SetForbidden(ctx context.Context, msg string) {
+	SetError(ctx, ErrForbidden(msg))
+}
+
+// 404
+func (c *BaseController[T]) SetNotFound(ctx context.Context, msg string) {
+	SetError(ctx, ErrNotFound(msg))
+}
+
+// 409
+func (c *BaseController[T]) SetConflict(ctx context.Context, msg string) {
+	SetError(ctx, ErrConflict(msg))
+}
+
+// 429
+func (c *BaseController[T]) SetTooManyRequests(ctx context.Context, msg string) {
+	SetError(ctx, ErrTooManyRequests(msg))
+}
+
+// 500
+func (c *BaseController[T]) SetInternalError(ctx context.Context, msg string, internal error) {
+	SetError(ctx, ErrInternal(msg, internal))
+}
+
+// check if have error
+func (c *BaseController[T]) HasError(ctx context.Context) bool {
+	return HasError(ctx)
+}
+
 func (c *BaseController[T]) Serve(ctx context.Context) error {
 	return nil
 }
@@ -235,12 +279,12 @@ func (c *BaseController[T]) parseBody() error {
 			originBody := httpReq.Body
 			// capable of reading data multiple times
 			rawBody, err := io.ReadAll(originBody)
-			c.gcx.RawBody = rawBody
 			if err != nil {
 				return err
 			}
+			c.gcx.RawBody = rawBody
 			defer originBody.Close()
-			httpReq.Body = io.NopCloser(bytes.NewBuffer(c.rawBody))
+			httpReq.Body = io.NopCloser(bytes.NewBuffer(rawBody))
 		}
 	}
 
