@@ -7,23 +7,6 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
-// responseCapture wraps http.ResponseWriter to capture response body
-type responseCapture struct {
-	http.ResponseWriter
-	body       []byte
-	statusCode int
-}
-
-func (r *responseCapture) Write(b []byte) (int, error) {
-	r.body = append(r.body, b...)
-	return r.ResponseWriter.Write(b)
-}
-
-func (r *responseCapture) WriteHeader(statusCode int) {
-	r.statusCode = statusCode
-	r.ResponseWriter.WriteHeader(statusCode)
-}
-
 func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) HandlerMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +14,7 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Ha
 			gcx := GetContext(ctx)
 
 			// Wrap ResponseWriter to capture response body
-			rw := &responseCapture{ResponseWriter: w, statusCode: http.StatusOK}
+			rw := newResponseCapture(w)
 			gcx.responseWriter = rw
 
 			gcx.SetContextOptions(WithLogger(logInst), WithPanicLogger(panicInst))
@@ -59,7 +42,17 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Ha
 			// Log status code
 			logger.AddInfo(ctx, "status", rw.statusCode)
 
-			logInst.Info(ctx, "ok")
+			if appErr := GetError(ctx); appErr != nil {
+				logger.AddInfo(ctx, "err_code", appErr.Code)
+				logger.AddInfo(ctx, "err_message", appErr.Message)
+				if appErr.Internal != nil {
+					logger.AddInfo(ctx, "err_internal", appErr.Internal.Error())
+				}
+				logInst.Warning(ctx, "request completed with error")
+			} else {
+				logInst.Info(ctx, "succ")
+			}
+
 		})
 	}
 }
