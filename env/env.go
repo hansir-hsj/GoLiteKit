@@ -132,7 +132,7 @@ func StaticDir() string {
 	if defaultEnv.StaticDir == "" {
 		return ""
 	}
-	return filepath.Join(ConfDir(), defaultEnv.StaticDir)
+	return filepath.Join(RootDir(), defaultEnv.StaticDir)
 }
 
 func ReadTimeout() time.Duration {
