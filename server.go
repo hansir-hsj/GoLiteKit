@@ -128,6 +128,10 @@ func (s *Server) Start() error {
 		return fmt.Errorf("server start error: %s", err)
 	}
 
+	if staticDir := env.StaticDir(); staticDir != "" {
+		s.ServeFile("/static", staticDir)
+	}
+
 	<-s.closeChan
 
 	return nil
