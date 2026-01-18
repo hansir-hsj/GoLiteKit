@@ -122,14 +122,14 @@ func (s *Server) Start() error {
 		l = tls.NewListener(l, config)
 	}
 
+	if staticDir := env.StaticDir(); staticDir != "" {
+		s.ServeFile("/static", staticDir)
+	}
+
 	s.listener = l
 	err = s.httpServer.Serve(l)
 	if err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("server start error: %s", err)
-	}
-
-	if staticDir := env.StaticDir(); staticDir != "" {
-		s.ServeFile("/static", staticDir)
 	}
 
 	<-s.closeChan
