@@ -36,6 +36,7 @@ type EnvHttpServer struct {
 	EnvRedis     `toml:"Redis"`
 	EnvTLSConfig `toml:"TLSConfig"`
 	EnvSSE       `toml:"SSE"`
+	EnvStatic    `toml:"Static"`
 }
 
 type EnvTimeout struct {
@@ -63,6 +64,10 @@ type EnvDB struct {
 
 type EnvRedis struct {
 	Redis string `toml:"configFile"`
+}
+
+type EnvStatic struct {
+	StaticDir string `toml:"staticDir"`
 }
 
 type EnvTLSConfig struct {
@@ -121,6 +126,13 @@ func RootDir() string {
 
 func ConfDir() string {
 	return defaultEnv.confDir
+}
+
+func StaticDir() string {
+	if defaultEnv.StaticDir == "" {
+		return ""
+	}
+	return filepath.Join(ConfDir(), defaultEnv.StaticDir)
 }
 
 func ReadTimeout() time.Duration {

@@ -26,6 +26,10 @@ logResponseBody = false  # 关闭响应体打印（可选）
 [HttpServer.DB]
 configFile = "db.toml"
 
+# 静态文件服务（可选）
+[HttpServer.Static]
+staticDir = "static"
+
 [HttpServer.TLSConfig]
 tls = false
 certFile = "tls/server.crt"
