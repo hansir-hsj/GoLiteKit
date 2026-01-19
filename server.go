@@ -142,9 +142,8 @@ func (s *Server) handleSignal() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit
 	switch sig {
-	case syscall.SIGINT:
-	case syscall.SIGTERM:
-		fmt.Fprintf(os.Stderr, "%s receive signal %v\n", time.Now(), sig)
+	case syscall.SIGINT, syscall.SIGTERM:
+		fmt.Fprintf(os.Stderr, "%s receive signal %v, shutting down...\n", time.Now(), sig)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), env.ShutdownTimeout())
 	defer cancel()

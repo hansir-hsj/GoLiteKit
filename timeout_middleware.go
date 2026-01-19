@@ -53,7 +53,8 @@ func TimeoutMiddleware() HandlerMiddleware {
 			case <-ctx.Done():
 				tw.markTimeout()
 				cause := context.Cause(ctx)
-				SetError(r.Context(), ErrTimeout(fmt.Sprintf("Request timeout: %v", cause)))
+				// Use the timeout context to set error, ensuring it's propagated correctly
+				SetError(ctx, ErrTimeout(fmt.Sprintf("Request timeout: %v", cause)))
 			case <-doneChan:
 				return
 			}
