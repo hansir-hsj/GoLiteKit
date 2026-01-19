@@ -220,6 +220,7 @@ type responseCapture struct {
 	http.ResponseWriter
 	body       []byte
 	statusCode int
+	mu         sync.Mutex
 }
 
 func newResponseCapture(w http.ResponseWriter) *responseCapture {
@@ -230,12 +231,16 @@ func newResponseCapture(w http.ResponseWriter) *responseCapture {
 }
 
 func (r *responseCapture) Write(b []byte) (int, error) {
+	r.mu.Lock()
 	r.body = append(r.body, b...)
+	r.mu.Unlock()
 	return r.ResponseWriter.Write(b)
 }
 
 func (r *responseCapture) WriteHeader(code int) {
+	r.mu.Lock()
 	r.statusCode = code
+	r.mu.Unlock()
 	r.ResponseWriter.WriteHeader(code)
 }
 

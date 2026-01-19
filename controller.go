@@ -269,16 +269,17 @@ func (c *BaseController[T]) parseBody() error {
 	var err error
 	ct := c.request.Header.Get("Content-Type")
 
-	switch ct {
-	case "application/x-www-form-urlencoded":
+	switch {
+	case strings.HasPrefix(ct, "application/x-www-form-urlencoded"):
 		err = c.request.ParseForm()
-	case "multipart/form-data":
+	case strings.HasPrefix(ct, "multipart/form-data"):
 		err = c.request.ParseMultipartForm(maxMemorySize)
 	default:
 		if httpReq.Body != nil {
 			originBody := httpReq.Body
 			// capable of reading data multiple times
-			rawBody, err := io.ReadAll(originBody)
+			var rawBody []byte
+			rawBody, err = io.ReadAll(originBody)
 			if err != nil {
 				return err
 			}

@@ -64,7 +64,7 @@ func NewRateLimiter(rat rate.Limit, burst int, opts ...RateLimiterOption) *RateL
 func (r *RateLimiter) GetLimiter(key string) *rate.Limiter {
 	r.mu.RLock()
 	limiter, exists := r.limiters[key]
-	defer r.mu.RUnlock()
+	r.mu.RUnlock()
 
 	if !exists {
 		r.mu.Lock()

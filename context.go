@@ -122,7 +122,7 @@ func HasError(ctx context.Context) bool {
 	return GetError(ctx) != nil
 }
 
-func CLearError(ctx context.Context) {
+func ClearError(ctx context.Context) {
 	gcx := GetContext(ctx)
 	if gcx != nil {
 		gcx.dataLock.Lock()
@@ -273,7 +273,9 @@ func (sse *SSEWriter) Send(event SSEvent) error {
 		return err
 	}
 
-	sse.w.(http.Flusher).Flush()
+	if f, ok := sse.w.(http.Flusher); ok {
+		f.Flush()
+	}
 
 	return nil
 }

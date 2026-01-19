@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -280,5 +281,5 @@ func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args
 		return
 	}
 
-	l.lines++
+	atomic.AddInt64(&l.lines, 1)
 }
