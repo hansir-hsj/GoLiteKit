@@ -33,23 +33,22 @@ type Server struct {
 	closeChan chan struct{}
 }
 
-func New(conf string) *Server {
+// New creates a new Server instance with the given configuration file.
+// Returns an error if the configuration, logger, or panic logger initialization fails.
+func New(conf string) (*Server, error) {
 	mux := http.NewServeMux()
 
 	if err := env.Init(conf); err != nil {
-		fmt.Fprintf(os.Stderr, "env init error: %v", err)
-		return nil
+		return nil, fmt.Errorf("env init error: %w", err)
 	}
 
 	logInst, err := logger.NewLogger(env.LoggerConfigFile())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "logger init error: %v", err)
-		return nil
+		return nil, fmt.Errorf("logger init error: %w", err)
 	}
 	panicLogger, err := logger.NewPanicLogger(env.LoggerConfigFile())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "panic logger init error: %v", err)
-		return nil
+		return nil, fmt.Errorf("panic logger init error: %w", err)
 	}
 
 	// inner middleware
@@ -85,7 +84,7 @@ func New(conf string) *Server {
 		mq:          mq,
 		logger:      logInst,
 		panicLogger: panicLogger,
-	}
+	}, nil
 }
 
 func (s *Server) Start() error {
@@ -176,13 +175,17 @@ func (s *Server) OnDelete(path string, controller Controller) {
 }
 
 func (s *Server) registerHandler(method, path string, controller Controller) {
+	s.registerHandlerWithMiddlewares(method, path, controller, nil)
+}
+
+func (s *Server) registerHandlerWithMiddlewares(method, path string, controller Controller, groupMiddlewares MiddlewareQueue) {
 	// 初始化 methodHandlers map
 	if s.methodHandlers == nil {
 		s.methodHandlers = make(map[string]map[string]http.Handler)
 	}
 
 	// 创建当前 method 的 handler
-	handler := s.createControllerHandler(controller)
+	handler := s.createControllerHandler(controller, groupMiddlewares)
 
 	// 检查该 path 是否已注册
 	if s.methodHandlers[path] == nil {
@@ -203,7 +206,8 @@ func (s *Server) registerHandler(method, path string, controller Controller) {
 }
 
 // createControllerHandler 封装 controller 处理逻辑，返回 http.Handler
-func (s *Server) createControllerHandler(controller Controller) http.Handler {
+// groupMiddlewares 是路由组的中间件，会在全局中间件之后、Controller之前执行
+func (s *Server) createControllerHandler(controller Controller, groupMiddlewares MiddlewareQueue) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := WithContext(r.Context())
 		ctx = logger.WithLoggerContext(ctx)
@@ -237,7 +241,14 @@ func (s *Server) createControllerHandler(controller Controller) http.Handler {
 			}
 		})
 
-		wrappedHandler := s.mq.Apply(controllerHandler)
+		// Apply group middlewares first (inner layer)
+		var wrappedHandler http.Handler = controllerHandler
+		if len(groupMiddlewares) > 0 {
+			wrappedHandler = groupMiddlewares.Apply(wrappedHandler)
+		}
+
+		// Apply global middlewares (outer layer)
+		wrappedHandler = s.mq.Apply(wrappedHandler)
 		wrappedHandler.ServeHTTP(w, r)
 	})
 }

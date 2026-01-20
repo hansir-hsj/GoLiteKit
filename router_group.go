@@ -3,15 +3,25 @@ package golitekit
 import "net/http"
 
 type RouterGroup struct {
-	prefix string
-	server *Server
+	prefix      string
+	server      *Server
+	middlewares MiddlewareQueue
 }
 
 func (s *Server) NewRouterGroup(prefix string) *RouterGroup {
 	return &RouterGroup{
-		prefix: prefix,
-		server: s,
+		prefix:      prefix,
+		server:      s,
+		middlewares: NewMiddlewareQueue(),
 	}
+}
+
+// Use adds middlewares to this router group.
+// These middlewares will be executed after global middlewares
+// and before the controller handler.
+func (rg *RouterGroup) Use(middlewares ...HandlerMiddleware) *RouterGroup {
+	rg.middlewares.Use(middlewares...)
+	return rg
 }
 
 func (rg *RouterGroup) OnAny(path string, controller Controller) {
@@ -39,5 +49,5 @@ func (rg *RouterGroup) OnDelete(path string, controller Controller) {
 
 func (rg *RouterGroup) registerHandler(method, path string, controller Controller) {
 	fullPath := rg.prefix + path
-	rg.server.registerHandler(method, fullPath, controller)
+	rg.server.registerHandlerWithMiddlewares(method, fullPath, controller, rg.middlewares)
 }

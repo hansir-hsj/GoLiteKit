@@ -21,20 +21,31 @@ type ContextKey int
 
 type ContextOption func(*Context)
 
+// Context holds all request-scoped data for a single HTTP request.
+// It provides access to request/response, logging, response building, and custom data storage.
+//
+// Note: Context is designed as a single entry point for convenience (similar to Gin/Echo),
+// grouping related functionality rather than splitting into multiple smaller structs.
 type Context struct {
+	// ===== HTTP Request/Response =====
 	request        *http.Request
 	RawBody        []byte
 	responseWriter http.ResponseWriter
-	logger         logger.Logger
-	panicLogger    *logger.PanicLogger
 
-	rawResponse  any
-	jsonResponse any
-	rawHtml      string
+	// ===== Logging =====
+	logger      logger.Logger
+	panicLogger *logger.PanicLogger
 
+	// ===== Response Data (mutually exclusive, checked in order) =====
+	rawResponse  any    // Raw data response ([]byte or string)
+	jsonResponse any    // JSON response data
+	rawHtml      string // HTML response
+
+	// ===== Server-Sent Events =====
 	sseWriter *SSEWriter
 
-	data     map[string]any
+	// ===== Custom Data Storage =====
+	data     map[string]any // Thread-safe key-value storage for request-scoped data
 	dataLock sync.Mutex
 }
 

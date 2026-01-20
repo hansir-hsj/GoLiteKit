@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -178,7 +179,101 @@ func (l *FileLogger) rotate() error {
 	l.lines = 0
 	l.LastRotate = time.Now()
 
+	// Clean up old log files asynchronously
+	go l.cleanOldFiles()
+
 	return nil
+}
+
+// cleanOldFiles removes old rotated log files exceeding MaxFileNum.
+// It runs asynchronously to avoid blocking log writes.
+func (l *FileLogger) cleanOldFiles() {
+	if l.logConf.MaxFileNum <= 0 {
+		return
+	}
+	cleanOldLogFiles(l.logConf.Dir, l.filePath, l.logConf.MaxFileNum)
+}
+
+// cleanOldLogFiles is a shared utility function to clean old rotated log files.
+// It removes files exceeding maxFileNum, keeping the most recent ones.
+// Parameters:
+//   - dir: the directory containing log files
+//   - filePath: the full path of the current log file (e.g., /logs/app.log)
+//   - maxFileNum: maximum number of rotated files to keep
+func cleanOldLogFiles(dir string, filePath string, maxFileNum int) {
+	if maxFileNum <= 0 {
+		return
+	}
+
+	baseFileName := filepath.Base(filePath)
+
+	// List all files in log directory
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to read log directory for cleanup: %v\n", err)
+		return
+	}
+
+	// Find rotated log files matching pattern: baseFileName.YYYYMMDD* or baseFileName.YYYYMMDDHH*
+	var rotatedFiles []os.DirEntry
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		// Match pattern: app.log.20260119... (rotated files)
+		if len(name) > len(baseFileName)+1 && name[:len(baseFileName)+1] == baseFileName+"." {
+			suffix := name[len(baseFileName)+1:]
+			// Check if suffix starts with digits (timestamp)
+			if len(suffix) >= 8 && isDigits(suffix[:8]) {
+				rotatedFiles = append(rotatedFiles, entry)
+			}
+		}
+	}
+
+	// If we have more files than maxFileNum, delete the oldest ones
+	if len(rotatedFiles) <= maxFileNum {
+		return
+	}
+
+	// Sort by file modification time (oldest first)
+	sortFilesByModTime(dir, rotatedFiles)
+
+	// Delete oldest files exceeding the limit
+	deleteCount := len(rotatedFiles) - maxFileNum
+	for i := 0; i < deleteCount; i++ {
+		targetPath := filepath.Join(dir, rotatedFiles[i].Name())
+		if err := os.Remove(targetPath); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to remove old log file %s: %v\n", targetPath, err)
+		}
+	}
+}
+
+// isDigits checks if a string contains only digits
+func isDigits(s string) bool {
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// sortFilesByModTime sorts files by modification time (oldest first)
+func sortFilesByModTime(dir string, files []os.DirEntry) {
+	// Simple bubble sort (usually small number of files)
+	for i := 0; i < len(files)-1; i++ {
+		for j := i + 1; j < len(files); j++ {
+			infoI, errI := files[i].Info()
+			infoJ, errJ := files[j].Info()
+			if errI != nil || errJ != nil {
+				continue
+			}
+			if infoI.ModTime().After(infoJ.ModTime()) {
+				files[i], files[j] = files[j], files[i]
+			}
+		}
+	}
 }
 
 // Rotate performs rotation (thread-safe)

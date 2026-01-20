@@ -118,7 +118,20 @@ func (l *PanicLogger) rotate() error {
 	l.file = newTarget
 	l.lastRotate = time.Now()
 
+	// Clean up old panic log files asynchronously
+	go l.cleanOldFiles()
+
 	return nil
+}
+
+// cleanOldFiles removes old rotated panic log files exceeding MaxFileNum.
+// It uses the shared cleanOldLogFiles utility function.
+func (l *PanicLogger) cleanOldFiles() {
+	if l.logConf == nil || l.logConf.MaxFileNum <= 0 {
+		return
+	}
+	dir := filepath.Dir(l.filePath)
+	cleanOldLogFiles(dir, l.filePath, l.logConf.MaxFileNum)
 }
 
 // rotateIfNeeded atomically checks and performs rotation if needed
