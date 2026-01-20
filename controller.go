@@ -581,54 +581,230 @@ func CloneController(src Controller) Controller {
 	return dstValue.Addr().Interface().(Controller)
 }
 
+// isSyncType checks if the type is a sync primitive that should not be copied.
+// These types must remain at their zero value in cloned instances.
+func isSyncType(t reflect.Type) bool {
+	typeName := t.String()
+	// Check for sync package types
+	if strings.HasPrefix(typeName, "sync.") {
+		return true
+	}
+	// Check for common sync type names (handles embedded or aliased types)
+	switch t.Name() {
+	case "Mutex", "RWMutex", "WaitGroup", "Cond", "Once", "Pool", "Map":
+		if t.PkgPath() == "sync" {
+			return true
+		}
+	}
+	return false
+}
+
+// deepCopyValue creates a deep copy of a value, handling interface{} and complex types.
+func deepCopyValue(src reflect.Value) reflect.Value {
+	if !src.IsValid() {
+		return src
+	}
+
+	switch src.Kind() {
+	case reflect.Ptr:
+		if src.IsNil() {
+			return reflect.Zero(src.Type())
+		}
+		dst := reflect.New(src.Type().Elem())
+		copyFields(src.Elem(), dst.Elem())
+		return dst
+
+	case reflect.Interface:
+		if src.IsNil() {
+			return reflect.Zero(src.Type())
+		}
+		// Get the underlying concrete value
+		elem := src.Elem()
+		copiedElem := deepCopyValue(elem)
+		// Create a new interface value and set it
+		dst := reflect.New(src.Type()).Elem()
+		if copiedElem.IsValid() {
+			dst.Set(copiedElem)
+		}
+		return dst
+
+	case reflect.Struct:
+		dst := reflect.New(src.Type()).Elem()
+		copyFields(src, dst)
+		return dst
+
+	case reflect.Slice:
+		if src.IsNil() {
+			return reflect.Zero(src.Type())
+		}
+		dst := reflect.MakeSlice(src.Type(), src.Len(), src.Cap())
+		for i := 0; i < src.Len(); i++ {
+			dst.Index(i).Set(deepCopyValue(src.Index(i)))
+		}
+		return dst
+
+	case reflect.Map:
+		if src.IsNil() {
+			return reflect.Zero(src.Type())
+		}
+		dst := reflect.MakeMap(src.Type())
+		for _, key := range src.MapKeys() {
+			copiedKey := deepCopyValue(key)
+			copiedValue := deepCopyValue(src.MapIndex(key))
+			dst.SetMapIndex(copiedKey, copiedValue)
+		}
+		return dst
+
+	case reflect.Array:
+		dst := reflect.New(src.Type()).Elem()
+		for i := 0; i < src.Len(); i++ {
+			dst.Index(i).Set(deepCopyValue(src.Index(i)))
+		}
+		return dst
+
+	default:
+		// For primitive types (int, string, bool, etc.), direct copy is safe
+		dst := reflect.New(src.Type()).Elem()
+		dst.Set(src)
+		return dst
+	}
+}
+
 func copyFields(src, dst reflect.Value) {
+	srcType := src.Type()
+
 	for i := 0; i < src.NumField(); i++ {
 		srcField := src.Field(i)
 		dstField := dst.Field(i)
+		fieldType := srcType.Field(i)
+
 		if !dstField.CanSet() {
 			continue
 		}
+
+		// Skip sync types - they should remain at zero value
+		if isSyncType(fieldType.Type) {
+			continue
+		}
+
+		// Check if the field type is a struct that contains sync types
+		if srcField.Kind() == reflect.Struct && containsSyncType(fieldType.Type) {
+			// Recursively copy, skipping sync fields inside
+			copyFields(srcField, dstField)
+			continue
+		}
+
 		switch srcField.Kind() {
+		case reflect.Interface:
+			// Handle interface{} types with deep copy
+			if !srcField.IsNil() {
+				copied := deepCopyValue(srcField)
+				if copied.IsValid() {
+					dstField.Set(copied)
+				}
+			}
+
 		case reflect.Struct:
 			copyFields(srcField, dstField)
+
 		case reflect.Ptr:
 			if srcField.IsNil() {
+				continue
+			}
+			// Check if pointing to a sync type
+			if isSyncType(srcField.Type().Elem()) {
 				continue
 			}
 			newPtr := reflect.New(srcField.Type().Elem())
 			copyFields(srcField.Elem(), newPtr.Elem())
 			dstField.Set(newPtr)
+
 		case reflect.Slice:
 			if srcField.IsNil() {
 				continue
 			}
 			dstField.Set(reflect.MakeSlice(srcField.Type(), srcField.Len(), srcField.Cap()))
 			for j := 0; j < srcField.Len(); j++ {
-				copyFields(srcField.Index(j), dstField.Index(j))
+				srcElem := srcField.Index(j)
+				dstElem := dstField.Index(j)
+				if srcElem.Kind() == reflect.Struct {
+					copyFields(srcElem, dstElem)
+				} else if srcElem.Kind() == reflect.Ptr || srcElem.Kind() == reflect.Interface {
+					copied := deepCopyValue(srcElem)
+					if copied.IsValid() {
+						dstElem.Set(copied)
+					}
+				} else {
+					dstElem.Set(srcElem)
+				}
 			}
+
 		case reflect.Map:
 			if srcField.IsNil() {
 				continue
 			}
 			dstField.Set(reflect.MakeMap(srcField.Type()))
 			for _, key := range srcField.MapKeys() {
-				newKey := reflect.New(key.Type()).Elem()
-				copyFields(key, newKey)
-				newValue := reflect.New(srcField.MapIndex(key).Type()).Elem()
-				copyFields(srcField.MapIndex(key), newValue)
-				dstField.SetMapIndex(newKey, newValue)
+				// Deep copy both key and value
+				copiedKey := deepCopyValue(key)
+				copiedValue := deepCopyValue(srcField.MapIndex(key))
+				dstField.SetMapIndex(copiedKey, copiedValue)
 			}
+
 		case reflect.Array:
 			for j := 0; j < srcField.Len(); j++ {
-				copyFields(srcField.Index(j), dstField.Index(j))
+				srcElem := srcField.Index(j)
+				dstElem := dstField.Index(j)
+				if srcElem.Kind() == reflect.Struct {
+					copyFields(srcElem, dstElem)
+				} else if srcElem.Kind() == reflect.Ptr || srcElem.Kind() == reflect.Interface {
+					copied := deepCopyValue(srcElem)
+					if copied.IsValid() {
+						dstElem.Set(copied)
+					}
+				} else {
+					dstElem.Set(srcElem)
+				}
 			}
+
 		case reflect.Chan:
-			if srcField.IsNil() {
-				continue
+			// Channels should not be copied; skip or keep nil
+			// If you want to share the channel, uncomment the following:
+			// if !srcField.IsNil() {
+			//     dstField.Set(srcField)
+			// }
+			continue
+
+		case reflect.Func:
+			// Functions are safe to share (they're immutable references)
+			if !srcField.IsNil() {
+				dstField.Set(srcField)
 			}
-			dstField.Set(srcField)
+
 		default:
+			// Primitive types: int, string, bool, float, etc.
 			dstField.Set(srcField)
 		}
 	}
+}
+
+// containsSyncType checks if a struct type contains any sync primitives
+func containsSyncType(t reflect.Type) bool {
+	if t.Kind() != reflect.Struct {
+		return false
+	}
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if isSyncType(field.Type) {
+			return true
+		}
+		// Recursively check embedded structs
+		if field.Type.Kind() == reflect.Struct {
+			if containsSyncType(field.Type) {
+				return true
+			}
+		}
+	}
+	return false
 }
