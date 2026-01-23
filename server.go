@@ -220,23 +220,28 @@ func (s *Server) createControllerHandler(controller Controller, groupMiddlewares
 			ctx := r.Context()
 			err := cloned.Init(ctx)
 			if err != nil {
+				SetError(ctx, ErrInternal("Controller init failed", err))
 				return
 			}
 			err = cloned.SanityCheck(ctx)
 			if err != nil {
+				SetError(ctx, ErrBadRequest("Sanity check failed", err))
 				return
 			}
 			err = cloned.ParseRequest(ctx, gcx.RawBody)
 			if err != nil {
+				SetError(ctx, ErrBadRequest("Parse request failed", err))
 				return
 			}
 
 			err = cloned.Serve(ctx)
 			if err != nil {
+				SetError(ctx, ErrInternal("Controller serve failed", err))
 				return
 			}
 			err = cloned.Finalize(ctx)
 			if err != nil {
+				SetError(ctx, ErrInternal("Controller finalize failed", err))
 				return
 			}
 		})

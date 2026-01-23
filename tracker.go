@@ -121,9 +121,11 @@ func (t *Tracker) End() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	if len(t.stack) > 0 {
-		t.stack[len(t.stack)-1].end()
+	if len(t.stack) == 0 {
+		return
 	}
+
+	t.stack[len(t.stack)-1].end()
 	t.stack = t.stack[:len(t.stack)-1]
 	if len(t.stack) > 0 {
 		t.stack[len(t.stack)-1].start()

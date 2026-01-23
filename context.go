@@ -111,10 +111,15 @@ func GetContextData(ctx context.Context, key string) (any, bool) {
 func SetError(ctx context.Context, err *AppError) {
 	gcx := GetContext(ctx)
 	if gcx != nil {
-		gcx.dataLock.Lock()
-		defer gcx.dataLock.Unlock()
-		gcx.data[AppErrorKey] = err
+		gcx.setError(err)
 	}
+}
+
+// SetError sets an error on this context (internal method, thread-safe)
+func (gcx *Context) setError(err *AppError) {
+	gcx.dataLock.Lock()
+	defer gcx.dataLock.Unlock()
+	gcx.data[AppErrorKey] = err
 }
 
 func GetError(ctx context.Context) *AppError {
@@ -123,7 +128,9 @@ func GetError(ctx context.Context) *AppError {
 		gcx.dataLock.Lock()
 		defer gcx.dataLock.Unlock()
 		if v, ok := gcx.data[AppErrorKey]; ok {
-			return v.(*AppError)
+			if err, ok := v.(*AppError); ok {
+				return err
+			}
 		}
 	}
 	return nil
@@ -226,6 +233,7 @@ func ContextAsMiddleware() HandlerMiddleware {
 					jsonData, err := json.Marshal(gcx.jsonResponse)
 					if err != nil {
 						SetError(ctx, ErrInternal("Failed to marshal JSON response", err))
+						return
 					}
 					w.Write(jsonData)
 				}
@@ -239,6 +247,7 @@ func ContextAsMiddleware() HandlerMiddleware {
 					w.Write([]byte(body))
 				default:
 					SetError(ctx, ErrInternal("Unsupported response type", nil))
+					return
 				}
 			} else if gcx.rawHtml != "" {
 				w.Header().Set("Content-Type", "text/html; charset=UTF-8")
