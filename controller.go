@@ -67,7 +67,10 @@ func (c *BaseController[T]) Init(ctx context.Context) error {
 	c.gcx = GetContext(ctx)
 	c.request = c.gcx.Request()
 	c.logger = c.gcx.logger
-	c.parseBody()
+
+	if err := c.parseBody(); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -197,48 +200,109 @@ func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) err
 	return nil
 }
 
+// ==================== Fluent Error Handling ====================
+// These methods set an error and return it, allowing fluent usage:
+//   return c.BadRequest("invalid input", err)
+// Instead of the old verbose pattern:
+//   c.SetBadRequest(ctx, "invalid input", err)
+//   return nil
+
+// Error sets a custom AppError and returns it for fluent usage
+// Usage: return c.Error(ErrBadRequest("msg", err))
+func (c *BaseController[T]) Error(err *AppError) error {
+	c.gcx.setError(err)
+	return err
+}
+
+// BadRequest sets a 400 error and returns it
+// Usage: return c.BadRequest("invalid input", err)
+func (c *BaseController[T]) BadRequest(msg string, internal error) error {
+	return c.Error(ErrBadRequest(msg, internal))
+}
+
+// Unauthorized sets a 401 error and returns it
+// Usage: return c.Unauthorized("please login")
+func (c *BaseController[T]) Unauthorized(msg string) error {
+	return c.Error(ErrUnauthorized(msg))
+}
+
+// Forbidden sets a 403 error and returns it
+// Usage: return c.Forbidden("no permission")
+func (c *BaseController[T]) Forbidden(msg string) error {
+	return c.Error(ErrForbidden(msg))
+}
+
+// NotFound sets a 404 error and returns it
+// Usage: return c.NotFound("user not found")
+func (c *BaseController[T]) NotFound(msg string) error {
+	return c.Error(ErrNotFound(msg))
+}
+
+// Conflict sets a 409 error and returns it
+// Usage: return c.Conflict("resource already exists")
+func (c *BaseController[T]) Conflict(msg string) error {
+	return c.Error(ErrConflict(msg))
+}
+
+// TooManyRequests sets a 429 error and returns it
+// Usage: return c.TooManyRequests("rate limit exceeded")
+func (c *BaseController[T]) TooManyRequests(msg string) error {
+	return c.Error(ErrTooManyRequests(msg))
+}
+
+// InternalError sets a 500 error and returns it
+// Usage: return c.InternalError("something went wrong", err)
+func (c *BaseController[T]) InternalError(msg string, internal error) error {
+	return c.Error(ErrInternal(msg, internal))
+}
+
+// HasError checks if there is an error in the current context
+func (c *BaseController[T]) HasError() bool {
+	return c.gcx.data[AppErrorKey] != nil
+}
+
+// ==================== Deprecated Methods (for backward compatibility) ====================
+// These methods are kept for backward compatibility but are deprecated.
+// Use the fluent methods above instead.
+
+// Deprecated: Use c.Error(err) instead
 func (c *BaseController[T]) SetError(ctx context.Context, err *AppError) {
-	SetError(ctx, err)
+	c.gcx.setError(err)
 }
 
-// 400
+// Deprecated: Use c.BadRequest(msg, err) instead
 func (c *BaseController[T]) SetBadRequest(ctx context.Context, msg string, internal error) {
-	SetError(ctx, ErrBadRequest(msg, internal))
+	c.gcx.setError(ErrBadRequest(msg, internal))
 }
 
-// 401
+// Deprecated: Use c.Unauthorized(msg) instead
 func (c *BaseController[T]) SetUnauthorized(ctx context.Context, msg string) {
-	SetError(ctx, ErrUnauthorized(msg))
+	c.gcx.setError(ErrUnauthorized(msg))
 }
 
-// 403
+// Deprecated: Use c.Forbidden(msg) instead
 func (c *BaseController[T]) SetForbidden(ctx context.Context, msg string) {
-	SetError(ctx, ErrForbidden(msg))
+	c.gcx.setError(ErrForbidden(msg))
 }
 
-// 404
+// Deprecated: Use c.NotFound(msg) instead
 func (c *BaseController[T]) SetNotFound(ctx context.Context, msg string) {
-	SetError(ctx, ErrNotFound(msg))
+	c.gcx.setError(ErrNotFound(msg))
 }
 
-// 409
+// Deprecated: Use c.Conflict(msg) instead
 func (c *BaseController[T]) SetConflict(ctx context.Context, msg string) {
-	SetError(ctx, ErrConflict(msg))
+	c.gcx.setError(ErrConflict(msg))
 }
 
-// 429
+// Deprecated: Use c.TooManyRequests(msg) instead
 func (c *BaseController[T]) SetTooManyRequests(ctx context.Context, msg string) {
-	SetError(ctx, ErrTooManyRequests(msg))
+	c.gcx.setError(ErrTooManyRequests(msg))
 }
 
-// 500
+// Deprecated: Use c.InternalError(msg, err) instead
 func (c *BaseController[T]) SetInternalError(ctx context.Context, msg string, internal error) {
-	SetError(ctx, ErrInternal(msg, internal))
-}
-
-// check if have error
-func (c *BaseController[T]) HasError(ctx context.Context) bool {
-	return HasError(ctx)
+	c.gcx.setError(ErrInternal(msg, internal))
 }
 
 func (c *BaseController[T]) Serve(ctx context.Context) error {
