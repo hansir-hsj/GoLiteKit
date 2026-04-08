@@ -45,7 +45,7 @@ func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 		filePath = logConf.PanicFileName()
 	}
 
-	// Check and rotate existing file if needed
+	// Rotate existing file if needed
 	if err := rotateExistingFileIfNeeded(filePath, logConf); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to rotate existing panic log file: %v\n", err)
 	}
@@ -71,7 +71,7 @@ func (l *PanicLogger) caller() string {
 	return strings.Join([]string{file, strconv.Itoa(line)}, ":")
 }
 
-// needRotate checks if rotation is needed (internal, no lock)
+// needRotate checks if rotation is needed.
 func (l *PanicLogger) needRotate() bool {
 	if l.logConf == nil {
 		return false
@@ -100,7 +100,7 @@ func (l *PanicLogger) needRotate() bool {
 	return false
 }
 
-// rotate performs the actual rotation (internal, no lock)
+// rotate performs the actual rotation.
 func (l *PanicLogger) rotate() error {
 	newFilePath := l.newFilePath(l.lastRotate)
 
@@ -118,14 +118,12 @@ func (l *PanicLogger) rotate() error {
 	l.file = newTarget
 	l.lastRotate = time.Now()
 
-	// Clean up old panic log files asynchronously
 	go l.cleanOldFiles()
 
 	return nil
 }
 
-// cleanOldFiles removes old rotated panic log files exceeding MaxFileNum.
-// It uses the shared cleanOldLogFiles utility function.
+// cleanOldFiles removes old rotated panic log files.
 func (l *PanicLogger) cleanOldFiles() {
 	if l.logConf == nil || l.logConf.MaxFileNum <= 0 {
 		return
@@ -134,7 +132,7 @@ func (l *PanicLogger) cleanOldFiles() {
 	cleanOldLogFiles(dir, l.filePath, l.logConf.MaxFileNum)
 }
 
-// rotateIfNeeded atomically checks and performs rotation if needed
+// rotateIfNeeded checks and performs rotation if needed.
 func (l *PanicLogger) rotateIfNeeded() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -145,7 +143,7 @@ func (l *PanicLogger) rotateIfNeeded() error {
 	return nil
 }
 
-// newFilePath generates new file path based on the given time (internal)
+// newFilePath generates new file path based on the given time.
 func (l *PanicLogger) newFilePath(t time.Time) string {
 	if l.logConf == nil {
 		return l.filePath
@@ -172,7 +170,6 @@ func (l *PanicLogger) newFilePath(t time.Time) string {
 }
 
 func (l *PanicLogger) Report(ctx context.Context, p any) {
-	// Check and rotate if needed
 	if err := l.rotateIfNeeded(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to rotate panic log: %v\n", err)
 	}

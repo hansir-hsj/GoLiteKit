@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 const (
@@ -26,8 +28,7 @@ type RequestSizeLimiter interface {
 	MaxBodySize() int64
 }
 
-// NoBody is a special tag type that indicates that the Controller does not need to parse the request body
-// Used for requests such as GET, DELETE, etc. that usually have no body
+// NoBody indicates the controller does not need request body parsing.
 type NoBody struct{}
 
 type Controller interface {
@@ -40,19 +41,13 @@ type Controller interface {
 	Finalize(ctx context.Context) error
 }
 
-// BaseController is a unified generic Controller base class
-// T can be:
-//   - Specific request structure: Automatically parse JSON/Form to c.Request
-//   - NoBody：indicates no request body, no parsing is performed
+// BaseController is a generic controller base. T is the request struct or NoBody.
 type BaseController[T any] struct {
 	request *http.Request
 	logger  logger.Logger
-
 	rawBody []byte
-
-	gcx *Context
-
-	Request T // Automatically parsed request data
+	gcx     *Context
+	Request T
 }
 
 func (c *BaseController[T]) MaxMemorySize() int64 {
@@ -75,18 +70,30 @@ func (c *BaseController[T]) Init(ctx context.Context) error {
 	return nil
 }
 
+func (c *BaseController[T]) DB() *gorm.DB {
+	if c.gcx == nil {
+		return nil
+	}
+	return c.gcx.DB()
+}
+
+func (c *BaseController[T]) Redis() *redis.Client {
+	if c.gcx == nil {
+		return nil
+	}
+	return c.gcx.Redis()
+}
+
 func (c *BaseController[T]) SanityCheck(ctx context.Context) error {
 	return nil
 }
 
 func (c *BaseController[T]) ParseRequest(ctx context.Context, body []byte) error {
-	// Check if it is of NoBody type
 	var zeroValue T
 	if _, isNoBody := any(zeroValue).(NoBody); isNoBody {
-		return nil // NoBody type, skip parsing
+		return nil
 	}
 
-	// If the body is empty, return directly
 	if len(body) == 0 {
 		return nil
 	}
@@ -104,7 +111,7 @@ func (c *BaseController[T]) ParseRequest(ctx context.Context, body []byte) error
 	}
 }
 
-// bindFormData Bind form data to a structure
+// bindFormData binds form data to a struct.
 func (c *BaseController[T]) bindFormData(dst *T) error {
 	dstValue := reflect.ValueOf(dst)
 	if dstValue.Kind() != reflect.Pointer {
@@ -118,34 +125,27 @@ func (c *BaseController[T]) bindFormData(dst *T) error {
 
 	dstType := dstValue.Type()
 
-	// Get form data
 	forms, err := c.forms()
 	if err != nil {
 		return err
 	}
 
-	// Traverse structure fields
 	for i := 0; i < dstValue.NumField(); i++ {
 		field := dstValue.Field(i)
 		fieldType := dstType.Field(i)
 
-		// Skip fields that cannot be set
 		if !field.CanSet() {
 			continue
 		}
 
-		// using form tag
 		formTag := fieldType.Tag.Get("form")
 		if formTag == "" {
-			// If there is no form tag, try using JSON tags
 			formTag = fieldType.Tag.Get("json")
 		}
 		if formTag == "" {
-			// If none exist, use field names
 			formTag = fieldType.Name
 		}
 
-		// Retrieve values from the form
 		values, ok := forms[formTag]
 		if !ok || len(values) == 0 {
 			continue
@@ -153,7 +153,6 @@ func (c *BaseController[T]) bindFormData(dst *T) error {
 
 		value := values[0]
 
-		// Set values based on field types
 		if err := c.setFieldValue(field, value); err != nil {
 			return fmt.Errorf("failed to set field %s: %w", fieldType.Name, err)
 		}
@@ -162,7 +161,7 @@ func (c *BaseController[T]) bindFormData(dst *T) error {
 	return nil
 }
 
-// setFieldValue Set field values
+// setFieldValue sets a struct field from string value.
 func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) error {
 	switch field.Kind() {
 	case reflect.String:
@@ -200,107 +199,91 @@ func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) err
 	return nil
 }
 
-// ==================== Fluent Error Handling ====================
-// These methods set an error and return it, allowing fluent usage:
-//   return c.BadRequest("invalid input", err)
-// Instead of the old verbose pattern:
-//   c.SetBadRequest(ctx, "invalid input", err)
-//   return nil
-
-// Error sets a custom AppError and returns it for fluent usage
-// Usage: return c.Error(ErrBadRequest("msg", err))
+// Error sets a custom AppError and returns it.
 func (c *BaseController[T]) Error(err *AppError) error {
 	c.gcx.setError(err)
 	return err
 }
 
-// BadRequest sets a 400 error and returns it
-// Usage: return c.BadRequest("invalid input", err)
+// BadRequest sets a 400 error and returns it.
 func (c *BaseController[T]) BadRequest(msg string, internal error) error {
 	return c.Error(ErrBadRequest(msg, internal))
 }
 
-// Unauthorized sets a 401 error and returns it
-// Usage: return c.Unauthorized("please login")
+// Unauthorized sets a 401 error and returns it.
 func (c *BaseController[T]) Unauthorized(msg string) error {
 	return c.Error(ErrUnauthorized(msg))
 }
 
-// Forbidden sets a 403 error and returns it
-// Usage: return c.Forbidden("no permission")
+// Forbidden sets a 403 error and returns it.
 func (c *BaseController[T]) Forbidden(msg string) error {
 	return c.Error(ErrForbidden(msg))
 }
 
-// NotFound sets a 404 error and returns it
-// Usage: return c.NotFound("user not found")
+// NotFound sets a 404 error and returns it.
 func (c *BaseController[T]) NotFound(msg string) error {
 	return c.Error(ErrNotFound(msg))
 }
 
-// Conflict sets a 409 error and returns it
-// Usage: return c.Conflict("resource already exists")
+// Conflict sets a 409 error and returns it.
 func (c *BaseController[T]) Conflict(msg string) error {
 	return c.Error(ErrConflict(msg))
 }
 
-// TooManyRequests sets a 429 error and returns it
-// Usage: return c.TooManyRequests("rate limit exceeded")
+// TooManyRequests sets a 429 error and returns it.
 func (c *BaseController[T]) TooManyRequests(msg string) error {
 	return c.Error(ErrTooManyRequests(msg))
 }
 
-// InternalError sets a 500 error and returns it
-// Usage: return c.InternalError("something went wrong", err)
+// InternalError sets a 500 error and returns it.
 func (c *BaseController[T]) InternalError(msg string, internal error) error {
 	return c.Error(ErrInternal(msg, internal))
 }
 
-// HasError checks if there is an error in the current context
+// HasError checks if there is an error in the current context.
 func (c *BaseController[T]) HasError() bool {
-	return c.gcx.data[AppErrorKey] != nil
+	if c.gcx == nil || c.request == nil {
+		return false
+	}
+	return HasError(c.request.Context())
 }
 
-// ==================== Deprecated Methods (for backward compatibility) ====================
-// These methods are kept for backward compatibility but are deprecated.
-// Use the fluent methods above instead.
-
-// Deprecated: Use c.Error(err) instead
+// Deprecated: Use c.Error(err) instead.
 func (c *BaseController[T]) SetError(ctx context.Context, err *AppError) {
 	c.gcx.setError(err)
 }
 
-// Deprecated: Use c.BadRequest(msg, err) instead
+// Deprecated: Use c.BadRequest(msg, err) instead.
 func (c *BaseController[T]) SetBadRequest(ctx context.Context, msg string, internal error) {
 	c.gcx.setError(ErrBadRequest(msg, internal))
 }
 
-// Deprecated: Use c.Unauthorized(msg) instead
+// Deprecated: Use c.Unauthorized(msg) instead.
 func (c *BaseController[T]) SetUnauthorized(ctx context.Context, msg string) {
 	c.gcx.setError(ErrUnauthorized(msg))
 }
 
-// Deprecated: Use c.Forbidden(msg) instead
+// Deprecated: Use c.Forbidden(msg) instead.
 func (c *BaseController[T]) SetForbidden(ctx context.Context, msg string) {
 	c.gcx.setError(ErrForbidden(msg))
 }
 
-// Deprecated: Use c.NotFound(msg) instead
+// Deprecated: Use c.NotFound(msg) instead.
 func (c *BaseController[T]) SetNotFound(ctx context.Context, msg string) {
 	c.gcx.setError(ErrNotFound(msg))
 }
 
-// Deprecated: Use c.Conflict(msg) instead
+// Deprecated: Use c.Conflict(msg) instead.
 func (c *BaseController[T]) SetConflict(ctx context.Context, msg string) {
 	c.gcx.setError(ErrConflict(msg))
 }
 
-// Deprecated: Use c.TooManyRequests(msg) instead
+// Deprecated: Use c.TooManyRequests(msg) instead.
 func (c *BaseController[T]) SetTooManyRequests(ctx context.Context, msg string) {
 	c.gcx.setError(ErrTooManyRequests(msg))
 }
 
-// Deprecated: Use c.InternalError(msg, err) instead
+// Deprecated: Use c.InternalError(msg, err) instead.
 func (c *BaseController[T]) SetInternalError(ctx context.Context, msg string, internal error) {
 	c.gcx.setError(ErrInternal(msg, internal))
 }
@@ -341,7 +324,6 @@ func (c *BaseController[T]) parseBody() error {
 	default:
 		if httpReq.Body != nil {
 			originBody := httpReq.Body
-			// capable of reading data multiple times
 			var rawBody []byte
 			rawBody, err = io.ReadAll(originBody)
 			if err != nil {
@@ -645,15 +627,12 @@ func CloneController(src Controller) Controller {
 	return dstValue.Addr().Interface().(Controller)
 }
 
-// isSyncType checks if the type is a sync primitive that should not be copied.
-// These types must remain at their zero value in cloned instances.
+// isSyncType checks if the type is a sync primitive.
 func isSyncType(t reflect.Type) bool {
 	typeName := t.String()
-	// Check for sync package types
 	if strings.HasPrefix(typeName, "sync.") {
 		return true
 	}
-	// Check for common sync type names (handles embedded or aliased types)
 	switch t.Name() {
 	case "Mutex", "RWMutex", "WaitGroup", "Cond", "Once", "Pool", "Map":
 		if t.PkgPath() == "sync" {
@@ -663,7 +642,7 @@ func isSyncType(t reflect.Type) bool {
 	return false
 }
 
-// deepCopyValue creates a deep copy of a value, handling interface{} and complex types.
+// deepCopyValue creates a deep copy of a value.
 func deepCopyValue(src reflect.Value) reflect.Value {
 	if !src.IsValid() {
 		return src
@@ -682,10 +661,8 @@ func deepCopyValue(src reflect.Value) reflect.Value {
 		if src.IsNil() {
 			return reflect.Zero(src.Type())
 		}
-		// Get the underlying concrete value
 		elem := src.Elem()
 		copiedElem := deepCopyValue(elem)
-		// Create a new interface value and set it
 		dst := reflect.New(src.Type()).Elem()
 		if copiedElem.IsValid() {
 			dst.Set(copiedElem)
@@ -727,7 +704,6 @@ func deepCopyValue(src reflect.Value) reflect.Value {
 		return dst
 
 	default:
-		// For primitive types (int, string, bool, etc.), direct copy is safe
 		dst := reflect.New(src.Type()).Elem()
 		dst.Set(src)
 		return dst
@@ -746,21 +722,19 @@ func copyFields(src, dst reflect.Value) {
 			continue
 		}
 
-		// Skip sync types - they should remain at zero value
+		// Skip sync types
 		if isSyncType(fieldType.Type) {
 			continue
 		}
 
-		// Check if the field type is a struct that contains sync types
+		// Check if struct contains sync types
 		if srcField.Kind() == reflect.Struct && containsSyncType(fieldType.Type) {
-			// Recursively copy, skipping sync fields inside
 			copyFields(srcField, dstField)
 			continue
 		}
 
 		switch srcField.Kind() {
 		case reflect.Interface:
-			// Handle interface{} types with deep copy
 			if !srcField.IsNil() {
 				copied := deepCopyValue(srcField)
 				if copied.IsValid() {
@@ -809,7 +783,6 @@ func copyFields(src, dst reflect.Value) {
 			}
 			dstField.Set(reflect.MakeMap(srcField.Type()))
 			for _, key := range srcField.MapKeys() {
-				// Deep copy both key and value
 				copiedKey := deepCopyValue(key)
 				copiedValue := deepCopyValue(srcField.MapIndex(key))
 				dstField.SetMapIndex(copiedKey, copiedValue)
@@ -832,27 +805,20 @@ func copyFields(src, dst reflect.Value) {
 			}
 
 		case reflect.Chan:
-			// Channels should not be copied; skip or keep nil
-			// If you want to share the channel, uncomment the following:
-			// if !srcField.IsNil() {
-			//     dstField.Set(srcField)
-			// }
 			continue
 
 		case reflect.Func:
-			// Functions are safe to share (they're immutable references)
 			if !srcField.IsNil() {
 				dstField.Set(srcField)
 			}
 
 		default:
-			// Primitive types: int, string, bool, float, etc.
 			dstField.Set(srcField)
 		}
 	}
 }
 
-// containsSyncType checks if a struct type contains any sync primitives
+// containsSyncType checks if a struct type contains sync primitives.
 func containsSyncType(t reflect.Type) bool {
 	if t.Kind() != reflect.Struct {
 		return false
@@ -863,7 +829,6 @@ func containsSyncType(t reflect.Type) bool {
 		if isSyncType(field.Type) {
 			return true
 		}
-		// Recursively check embedded structs
 		if field.Type.Kind() == reflect.Struct {
 			if containsSyncType(field.Type) {
 				return true

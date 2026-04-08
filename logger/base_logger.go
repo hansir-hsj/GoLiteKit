@@ -8,7 +8,6 @@ import (
 )
 
 // logRecord creates and handles a slog.Record with the given parameters.
-// callerSkip should be adjusted based on the call depth.
 func logRecord(ctx context.Context, handler slog.Handler, level slog.Level, msg string, callerSkip int, args ...any) error {
 	var pc uintptr
 	var pcs [1]uintptr

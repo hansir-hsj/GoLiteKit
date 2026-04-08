@@ -1,22 +1,17 @@
 package db
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/config"
-
 	"github.com/hansir-hsj/GoLiteKit/env"
 
 	"github.com/go-sql-driver/mysql"
 	mysqlDriver "gorm.io/driver/mysql"
 	"gorm.io/gorm"
-)
-
-var (
-	defaultDB *gorm.DB
 )
 
 type DbTimeout struct {
@@ -50,10 +45,6 @@ type Config struct {
 	gorm.Config
 }
 
-func NewDB() *gorm.DB {
-	return defaultDB
-}
-
 func parse(conf string) (*Config, error) {
 	var dbConfig Config
 	if err := config.Parse(conf, &dbConfig); err != nil {
@@ -81,45 +72,67 @@ func parse(conf string) (*Config, error) {
 	return &dbConfig, nil
 }
 
-func Init(conf ...string) error {
+// NewFromConfig creates a new database connection from config file
+func NewFromConfig(conf ...string) (*gorm.DB, error) {
 	var dbConf string
 	if len(conf) > 0 {
 		dbConf = conf[0]
 	} else {
 		dbConf = filepath.Join(env.ConfDir(), "db.toml")
 	}
-	config, err := parse(dbConf)
+
+	cfg, err := parse(dbConf)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database connection: %v\n", err)
-		return err
+		return nil, fmt.Errorf("failed to parse db config: %w", err)
 	}
-	db, err := gorm.Open(mysqlDriver.Open(config.DSN), config)
+
+	db, err := gorm.Open(mysqlDriver.Open(cfg.DSN), cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database connection: %v\n", err)
-		return err
+		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
 
 	sqlDB, err := db.DB()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to get SQL database connection: %v\n", err)
-		return err
+		return nil, fmt.Errorf("failed to get SQL database connection: %w", err)
 	}
 
-	if config.MaxOpenConns > 0 {
-		sqlDB.SetMaxOpenConns(config.MaxOpenConns)
+	if cfg.MaxOpenConns > 0 {
+		sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
 	}
-	if config.MaxIdleConns > 0 {
-		sqlDB.SetMaxIdleConns(config.MaxIdleConns)
+	if cfg.MaxIdleConns > 0 {
+		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	}
-	if config.ConnMaxLifeTime > 0 {
-		sqlDB.SetConnMaxLifetime(time.Duration(config.ConnMaxLifeTime) * time.Second)
+	if cfg.ConnMaxLifeTime > 0 {
+		sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifeTime) * time.Second)
 	}
 
 	if err := sqlDB.Ping(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to ping database: %v\n", err)
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	return db, nil
+}
+
+// Close closes the database connection
+func Close(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
 		return err
 	}
-	defaultDB = db
+	return sqlDB.Close()
+}
 
-	return nil
+// Ping checks if the database connection is alive
+func Ping(ctx context.Context, db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("database connection is nil")
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.PingContext(ctx)
 }

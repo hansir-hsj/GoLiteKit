@@ -31,8 +31,7 @@ func WithPanicCallback(f func(r *http.Request, recovered any)) ErrorHandlerOptio
 	}
 }
 
-// ErrorHandlerMiddleware unified error handling middleware
-// it should be placed at the outermost layer of middleware chain
+// ErrorHandlerMiddleware handles errors. Place at outermost middleware layer.
 func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 	cfg := &errorHandlerConfig{
 		formatter: defaultErrorFormatter,
@@ -43,37 +42,30 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// ResponseWriterwith deferred writing
 			dw := newDeferredResponseWriter(w)
 
-			// panic-independent error process path
 			defer func() {
 				if p := recover(); p != nil {
 					handlePanic(w, r, p, cfg)
 				}
 			}()
 
-			// process handler chain
 			next.ServeHTTP(dw, r)
 
 			ctx := r.Context()
 
-			// check error
 			if appErr := GetError(ctx); appErr != nil {
-				// reset
 				dw.Reset()
-				// call unified error handling
 				handleAppError(w, r, appErr, cfg)
 				return
 			}
 
-			// no errors, submit response
 			dw.Commit()
 		})
 	}
 }
 
-// handlePanic specifically handle panic
+// handlePanic handles panic and returns 500 error.
 func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *errorHandlerConfig) {
 	ctx := r.Context()
 	logID := ""
@@ -81,17 +73,14 @@ func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *err
 		logID = tracker.LogID()
 	}
 
-	// 1. record panic logs - including the complete stack trace
 	if gcx := GetContext(ctx); gcx != nil && gcx.PanicLogger() != nil {
 		gcx.PanicLogger().Report(ctx, recovered)
 	}
 
-	// 2. trigger panic-specific callbaks
 	if cfg.onPanic != nil {
 		cfg.onPanic(r, recovered)
 	}
 
-	// 3. return 500 error using unified Response format
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusInternalServerError)
 
@@ -103,7 +92,7 @@ func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *err
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleAppError - handle business error
+// handleAppError handles business errors.
 func handleAppError(w http.ResponseWriter, r *http.Request, err *AppError, cfg *errorHandlerConfig) {
 	ctx := r.Context()
 	logID := ""
@@ -111,7 +100,6 @@ func handleAppError(w http.ResponseWriter, r *http.Request, err *AppError, cfg *
 		logID = tracker.LogID()
 	}
 
-	// business error callback
 	if cfg.onError != nil {
 		cfg.onError(r, err)
 	}
@@ -119,7 +107,7 @@ func handleAppError(w http.ResponseWriter, r *http.Request, err *AppError, cfg *
 	cfg.formatter(w, err, logID)
 }
 
-// defaultErrorFormatter using unified Response format
+// defaultErrorFormatter formats error as JSON response.
 func defaultErrorFormatter(w http.ResponseWriter, err *AppError, logID string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(err.Code)

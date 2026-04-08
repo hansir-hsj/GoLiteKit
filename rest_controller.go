@@ -13,8 +13,7 @@ type Response struct {
 	LogID  string `json:"logid,omitempty"`
 }
 
-// RestController is a RESTful API style generic controller
-// T is the request body type, which can be a concrete structure or NoBody
+// RestController is a RESTful API style generic controller.
 type RestController[T any] struct {
 	BaseController[T]
 }
@@ -70,6 +69,5 @@ func (c *RestController[T]) ServeErrorMsg(ctx context.Context, msg string) {
 	c.ServeError(ctx, -1, msg)
 }
 
-// RestGetController is a convenient alias for REST Controllers without request bodies
-// Suitable for headless RESTful interfaces such as GET, DELETE, etc
+// RestGetController is for REST endpoints without request bodies (GET, DELETE).
 type RestGetController = RestController[NoBody]
