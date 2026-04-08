@@ -141,7 +141,7 @@ func (d *deferredResponseWriter) WriteHeader(code int) {
 	d.statusCode = code
 }
 
-// commit all cached responses to the actual ResponseWriter
+// Commit writes cached response to the actual ResponseWriter.
 func (d *deferredResponseWriter) Commit() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()

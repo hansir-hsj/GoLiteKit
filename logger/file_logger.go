@@ -37,10 +37,8 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 
 	filePath := logConf.LogFileName()
 
-	// 检查已存在的日志文件是否需要在打开前轮转
-	// 如果文件修改时间属于上一个时间周期，先执行轮转
+	// Rotate existing file if needed before opening
 	if err := rotateExistingFileIfNeeded(filePath, logConf); err != nil {
-		// 轮转失败不影响正常日志功能，仅打印警告
 		fmt.Fprintf(os.Stderr, "warning: failed to rotate existing log file: %v\n", err)
 	}
 
@@ -57,23 +55,22 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 		filePath:   filePath,
 		logger:     slog.New(handler),
 		file:       target,
-		LastRotate: time.Now(), // 初始化为当前时间
+		LastRotate: time.Now(),
 	}, nil
 }
 
-// rotateExistingFileIfNeeded 检查并轮转已存在的旧日志文件
-// 当服务重启时，如果旧日志文件的修改时间属于上一个时间周期，需要先归档
+// rotateExistingFileIfNeeded rotates old log files from previous time periods.
 func rotateExistingFileIfNeeded(filePath string, logConf *Config) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil // 文件不存在，无需轮转
+			return nil
 		}
 		return err
 	}
 
 	if info.Size() == 0 {
-		return nil // 文件为空，无需轮转
+		return nil
 	}
 
 	modTime := info.ModTime()
@@ -101,7 +98,6 @@ func rotateExistingFileIfNeeded(filePath string, logConf *Config) error {
 		return nil
 	}
 
-	// 根据文件修改时间生成归档文件名
 	var newFilePath string
 	switch logConf.RotateRule {
 	case "1min":
@@ -120,11 +116,10 @@ func rotateExistingFileIfNeeded(filePath string, logConf *Config) error {
 		return nil
 	}
 
-	// 执行轮转：重命名旧文件
 	return os.Rename(filePath, newFilePath)
 }
 
-// needRotate checks if rotation is needed (internal, no lock)
+// needRotate checks if rotation is needed.
 func (l *FileLogger) needRotate() bool {
 	now := time.Now()
 	last := l.LastRotate
@@ -149,16 +144,15 @@ func (l *FileLogger) needRotate() bool {
 	return false
 }
 
-// NeedRotate checks if rotation is needed (thread-safe)
+// NeedRotate checks if rotation is needed (thread-safe).
 func (l *FileLogger) NeedRotate() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.needRotate()
 }
 
-// rotate performs the actual rotation (internal, no lock)
+// rotate performs the actual rotation.
 func (l *FileLogger) rotate() error {
-	// 使用上次轮转时间生成文件名，确保文件名对应正确的时间周期
 	newFilePath := l.newFilePath(l.LastRotate)
 
 	if err := l.file.Close(); err != nil {
@@ -179,14 +173,12 @@ func (l *FileLogger) rotate() error {
 	l.lines = 0
 	l.LastRotate = time.Now()
 
-	// Clean up old log files asynchronously
 	go l.cleanOldFiles()
 
 	return nil
 }
 
-// cleanOldFiles removes old rotated log files exceeding MaxFileNum.
-// It runs asynchronously to avoid blocking log writes.
+// cleanOldFiles removes old rotated log files.
 func (l *FileLogger) cleanOldFiles() {
 	if l.logConf.MaxFileNum <= 0 {
 		return
@@ -194,12 +186,7 @@ func (l *FileLogger) cleanOldFiles() {
 	cleanOldLogFiles(l.logConf.Dir, l.filePath, l.logConf.MaxFileNum)
 }
 
-// cleanOldLogFiles is a shared utility function to clean old rotated log files.
-// It removes files exceeding maxFileNum, keeping the most recent ones.
-// Parameters:
-//   - dir: the directory containing log files
-//   - filePath: the full path of the current log file (e.g., /logs/app.log)
-//   - maxFileNum: maximum number of rotated files to keep
+// cleanOldLogFiles removes old rotated log files exceeding maxFileNum.
 func cleanOldLogFiles(dir string, filePath string, maxFileNum int) {
 	if maxFileNum <= 0 {
 		return
@@ -207,39 +194,32 @@ func cleanOldLogFiles(dir string, filePath string, maxFileNum int) {
 
 	baseFileName := filepath.Base(filePath)
 
-	// List all files in log directory
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to read log directory for cleanup: %v\n", err)
 		return
 	}
 
-	// Find rotated log files matching pattern: baseFileName.YYYYMMDD* or baseFileName.YYYYMMDDHH*
 	var rotatedFiles []os.DirEntry
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
-		// Match pattern: app.log.20260119... (rotated files)
 		if len(name) > len(baseFileName)+1 && name[:len(baseFileName)+1] == baseFileName+"." {
 			suffix := name[len(baseFileName)+1:]
-			// Check if suffix starts with digits (timestamp)
 			if len(suffix) >= 8 && isDigits(suffix[:8]) {
 				rotatedFiles = append(rotatedFiles, entry)
 			}
 		}
 	}
 
-	// If we have more files than maxFileNum, delete the oldest ones
 	if len(rotatedFiles) <= maxFileNum {
 		return
 	}
 
-	// Sort by file modification time (oldest first)
 	sortFilesByModTime(dir, rotatedFiles)
 
-	// Delete oldest files exceeding the limit
 	deleteCount := len(rotatedFiles) - maxFileNum
 	for i := 0; i < deleteCount; i++ {
 		targetPath := filepath.Join(dir, rotatedFiles[i].Name())
@@ -249,7 +229,7 @@ func cleanOldLogFiles(dir string, filePath string, maxFileNum int) {
 	}
 }
 
-// isDigits checks if a string contains only digits
+// isDigits checks if a string contains only digits.
 func isDigits(s string) bool {
 	for _, c := range s {
 		if c < '0' || c > '9' {
@@ -259,9 +239,8 @@ func isDigits(s string) bool {
 	return true
 }
 
-// sortFilesByModTime sorts files by modification time (oldest first)
+// sortFilesByModTime sorts files by modification time (oldest first).
 func sortFilesByModTime(dir string, files []os.DirEntry) {
-	// Simple bubble sort (usually small number of files)
 	for i := 0; i < len(files)-1; i++ {
 		for j := i + 1; j < len(files); j++ {
 			infoI, errI := files[i].Info()
@@ -276,14 +255,14 @@ func sortFilesByModTime(dir string, files []os.DirEntry) {
 	}
 }
 
-// Rotate performs rotation (thread-safe)
+// Rotate performs rotation (thread-safe).
 func (l *FileLogger) Rotate() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.rotate()
 }
 
-// rotateIfNeeded atomically checks and performs rotation if needed
+// rotateIfNeeded checks and performs rotation if needed.
 func (l *FileLogger) rotateIfNeeded() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -294,7 +273,7 @@ func (l *FileLogger) rotateIfNeeded() error {
 	return nil
 }
 
-// newFilePath generates new file path based on the given time (internal)
+// newFilePath generates new file path based on the given time.
 func (l *FileLogger) newFilePath(t time.Time) string {
 	switch l.logConf.RotateRule {
 	case "no":
@@ -316,7 +295,7 @@ func (l *FileLogger) newFilePath(t time.Time) string {
 	return l.filePath
 }
 
-// NewFilePath generates new file path (for Rotator interface compatibility)
+// NewFilePath generates new file path for Rotator interface.
 func (l *FileLogger) NewFilePath() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -365,12 +344,10 @@ func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args
 		return
 	}
 
-	// 原子操作：检查并轮转
 	if err := l.rotateIfNeeded(); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to rotate log file: %v\n", err)
 	}
 
-	// callerSkip=5: logRecord -> log -> logit -> Debug/Info/... -> user code
 	if err := logRecord(ctx, l.logger.Handler(), level, msg, 5, args...); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to log message: %v\n", err)
 		return

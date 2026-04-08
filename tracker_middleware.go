@@ -11,7 +11,6 @@ func TrackerMiddleware() HandlerMiddleware {
 			ctx = WithTracker(ctx)
 			tracker := GetTracker(ctx)
 			if tracker == nil {
-				// if the tracker is nil, continue executing without tracking
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -29,7 +29,6 @@ func CompressionMiddleware(level ...int) HandlerMiddleware {
 
 			w.Header().Set("Content-Encoding", "gzip")
 			w.Header().Set("Vary", "Accept-Encoding")
-			// Remove Content-Length to avoid issues with compressed content
 			w.Header().Del("Content-Length")
 
 			gzw := &gzipResponseWriter{

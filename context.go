@@ -9,43 +9,36 @@ import (
 	"sync"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
+	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
 )
 
 const (
 	globalContextKey ContextKey = iota
-	errorContextKey
-	AppErrorKey = "__app_error__"
+	AppErrorKey                 = "__app_error__"
 )
 
 type ContextKey int
 
 type ContextOption func(*Context)
 
-// Context holds all request-scoped data for a single HTTP request.
-// It provides access to request/response, logging, response building, and custom data storage.
-//
-// Note: Context is designed as a single entry point for convenience (similar to Gin/Echo),
-// grouping related functionality rather than splitting into multiple smaller structs.
+// Context holds request-scoped data for a single HTTP request.
 type Context struct {
-	// ===== HTTP Request/Response =====
 	request        *http.Request
 	RawBody        []byte
 	responseWriter http.ResponseWriter
 
-	// ===== Logging =====
 	logger      logger.Logger
 	panicLogger *logger.PanicLogger
+	services    *Services
 
-	// ===== Response Data (mutually exclusive, checked in order) =====
-	rawResponse  any    // Raw data response ([]byte or string)
-	jsonResponse any    // JSON response data
-	rawHtml      string // HTML response
+	rawResponse  any
+	jsonResponse any
+	rawHtml      string
 
-	// ===== Server-Sent Events =====
 	sseWriter *SSEWriter
 
-	// ===== Custom Data Storage =====
-	data     map[string]any // Thread-safe key-value storage for request-scoped data
+	data     map[string]any
 	dataLock sync.Mutex
 }
 
@@ -87,6 +80,22 @@ func WithContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+// newContext creates a new request context (internal use).
+func newContext(w http.ResponseWriter, r *http.Request, s *Services) context.Context {
+	return WithContext(r.Context())
+}
+
+// _WithServices injects services into context (internal use).
+func _WithServices(s *Services) ContextOption {
+	return func(gcx *Context) {
+		gcx.services = s
+		if s != nil {
+			gcx.logger = s.logger
+			gcx.panicLogger = s.panicLogger
+		}
+	}
+}
+
 func SetContextData(ctx context.Context, key string, data any) {
 	gcx := GetContext(ctx)
 	if gcx != nil {
@@ -115,7 +124,7 @@ func SetError(ctx context.Context, err *AppError) {
 	}
 }
 
-// SetError sets an error on this context (internal method, thread-safe)
+// setError sets an error on this context (thread-safe).
 func (gcx *Context) setError(err *AppError) {
 	gcx.dataLock.Lock()
 	defer gcx.dataLock.Unlock()
@@ -168,15 +177,21 @@ func WithResponseWriter(w http.ResponseWriter) ContextOption {
 	}
 }
 
-func WithLogger(logger logger.Logger) ContextOption {
+func withLogger(logger logger.Logger) ContextOption {
 	return func(gcx *Context) {
 		gcx.logger = logger
 	}
 }
 
-func WithPanicLogger(pl *logger.PanicLogger) ContextOption {
+func withPanicLogger(pl *logger.PanicLogger) ContextOption {
 	return func(gcx *Context) {
 		gcx.panicLogger = pl
+	}
+}
+
+func WithServices(s *Services) ContextOption {
+	return func(gcx *Context) {
+		gcx.services = s
 	}
 }
 
@@ -194,6 +209,20 @@ func (ctx *Context) Logger() logger.Logger {
 
 func (ctx *Context) PanicLogger() *logger.PanicLogger {
 	return ctx.panicLogger
+}
+
+func (ctx *Context) DB() *gorm.DB {
+	if ctx.services == nil {
+		return nil
+	}
+	return ctx.services.DB()
+}
+
+func (ctx *Context) Redis() *redis.Client {
+	if ctx.services == nil {
+		return nil
+	}
+	return ctx.services.Redis()
 }
 
 func (ctx *Context) ServeRawData(data any) {
@@ -330,4 +359,56 @@ func (ctx *Context) SSEWriter() *SSEWriter {
 
 func (ctx *Context) ServeSSE() *SSEWriter {
 	return ctx.SSEWriter()
+}
+
+// Query returns query parameter value.
+func (ctx *Context) Query(key string) string {
+	if ctx.request == nil {
+		return ""
+	}
+	return ctx.request.URL.Query().Get(key)
+}
+
+// QueryDefault returns query parameter or default value if empty.
+func (ctx *Context) QueryDefault(key, defaultValue string) string {
+	if v := ctx.Query(key); v != "" {
+		return v
+	}
+	return defaultValue
+}
+
+// Param returns path parameter value (Go 1.22+).
+func (ctx *Context) Param(key string) string {
+	if ctx.request == nil {
+		return ""
+	}
+	return ctx.request.PathValue(key)
+}
+
+// JSON writes JSON response with status code.
+func (ctx *Context) JSON(code int, data any) error {
+	ctx.responseWriter.Header().Set("Content-Type", "application/json")
+	ctx.responseWriter.WriteHeader(code)
+	return json.NewEncoder(ctx.responseWriter).Encode(data)
+}
+
+// String writes plain text response with status code.
+func (ctx *Context) String(code int, s string) error {
+	ctx.responseWriter.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	ctx.responseWriter.WriteHeader(code)
+	_, err := ctx.responseWriter.Write([]byte(s))
+	return err
+}
+
+// HTML writes HTML response with status code.
+func (ctx *Context) HTML(code int, html string) error {
+	ctx.responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
+	ctx.responseWriter.WriteHeader(code)
+	_, err := ctx.responseWriter.Write([]byte(html))
+	return err
+}
+
+// Services returns the service container.
+func (ctx *Context) Services() *Services {
+	return ctx.services
 }

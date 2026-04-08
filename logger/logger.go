@@ -56,7 +56,6 @@ type LoggerConfig struct {
 	MinLevel string `toml:"level"`
 	Format   string `toml:"format"`
 
-	// Rotator 相关
 	RotateRule string `toml:"rotateRule"`
 	MaxFileNum int    `toml:"maxFileNum"`
 }
@@ -110,15 +109,12 @@ func NewLogger(loggerConfig ...string) (Logger, error) {
 	opts := &slog.HandlerOptions{
 		Level:     LevelDebug,
 		AddSource: false,
-		// 自定义日志级别和时间格式
 		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
-			// 自定义时间格式
 			if attr.Key == slog.TimeKey {
 				if t, ok := attr.Value.Any().(time.Time); ok {
 					attr.Value = slog.StringValue(t.Format("2006-01-02 15:04:05.000"))
 				}
 			}
-			// 自定义日志级别
 			if attr.Key == slog.LevelKey {
 				level := attr.Value.Any().(slog.Level)
 				levelLabel, exists := LevelNames[level]

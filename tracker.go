@@ -32,7 +32,6 @@ type Tracker struct {
 	stack    []*serviceTracker
 	services map[string]*serviceTracker
 
-	// tracking requests, each request is unique
 	logID string
 
 	mu sync.Mutex
@@ -136,7 +135,6 @@ func (t *Tracker) LogTracker(ctx context.Context) {
 	t.totalCost = time.Since(t.startTime)
 	selfCost := t.totalCost
 
-	// add logid
 	logger.AddInfo(ctx, "logid", t.LogID())
 
 	for _, s := range t.services {

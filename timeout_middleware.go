@@ -29,7 +29,6 @@ func TimeoutMiddleware() HandlerMiddleware {
 			)
 			defer cancel()
 
-			// use thread-safe ResponseWriter
 			tw := newTimeoutResponseWriter(w)
 
 			doneChan := make(chan struct{}, 1)
@@ -48,12 +47,10 @@ func TimeoutMiddleware() HandlerMiddleware {
 
 			select {
 			case p := <-panicChan:
-				// panic again, let outer ErrorHandlerMiddleware handle it
 				panic(p)
 			case <-ctx.Done():
 				tw.markTimeout()
 				cause := context.Cause(ctx)
-				// Use the timeout context to set error, ensuring it's propagated correctly
 				SetError(ctx, ErrTimeout(fmt.Sprintf("Request timeout: %v", cause)))
 			case <-doneChan:
 				return
