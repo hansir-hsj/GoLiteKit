@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/hansir-hsj/GoLiteKit/env"
 )
@@ -31,7 +32,7 @@ func TimeoutMiddleware() HandlerMiddleware {
 
 			tw := newTimeoutResponseWriter(w)
 
-			doneChan := make(chan struct{}, 1)
+			doneChan := make(chan struct{})
 			panicChan := make(chan any, 1)
 
 			go func() {
@@ -39,10 +40,10 @@ func TimeoutMiddleware() HandlerMiddleware {
 					if p := recover(); p != nil {
 						panicChan <- p
 					}
+					close(doneChan)
 				}()
 
 				next.ServeHTTP(tw, r.WithContext(ctx))
-				close(doneChan)
 			}()
 
 			select {
@@ -52,8 +53,23 @@ func TimeoutMiddleware() HandlerMiddleware {
 				tw.markTimeout()
 				cause := context.Cause(ctx)
 				SetError(ctx, ErrTimeout(fmt.Sprintf("Request timeout: %v", cause)))
+				// Do not wait for the handler goroutine: it may block on I/O that
+				// ignores context cancellation. Start a background drainer to catch
+				// any late panic and log it, then let the goroutine finish on its own.
+				go func() {
+					select {
+					case p := <-panicChan:
+						fmt.Fprintf(os.Stderr, "panic in timed-out handler: %v\n", p)
+					case <-doneChan:
+					}
+				}()
 			case <-doneChan:
-				return
+				// doneChan is closed inside defer, after an optional panic write, so check panicChan first.
+				select {
+				case p := <-panicChan:
+					panic(p)
+				default:
+				}
 			}
 		})
 	}

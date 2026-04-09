@@ -61,7 +61,14 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 	}
 
 	if services.logger == nil {
-		l, err := logger.NewLogger(env.LoggerConfigFile())
+		loggerCfg := env.LoggerConfigFile()
+		var l logger.Logger
+		var err error
+		if loggerCfg == "" {
+			l, err = logger.NewLogger() // no config; fall back to console logger
+		} else {
+			l, err = logger.NewLogger(loggerCfg)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -82,7 +89,9 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 			WithErrorCallback(func(r *http.Request, err *AppError) {
 				services.logger.Warning(r.Context(), "request error: %d %s", err.Code, err.Message)
 			}),
-			WithPanicCallback(func(r *http.Request, recovered any) {}),
+			WithPanicCallback(func(r *http.Request, recovered any) {
+			services.panicLogger.Report(r.Context(), recovered)
+		}),
 		),
 		LoggerAsMiddleware(services.logger, services.panicLogger),
 		TrackerMiddleware(),
@@ -113,7 +122,7 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 	}, nil
 }
 
-// Route registration shortcuts
+// Route registration shortcuts — delegate to the embedded Router.
 func (a *App) GET(path string, c Controller)        { a.Router.GET(path, c) }
 func (a *App) POST(path string, c Controller)       { a.Router.POST(path, c) }
 func (a *App) PUT(path string, c Controller)        { a.Router.PUT(path, c) }

@@ -7,6 +7,8 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
+// LoggerAsMiddleware logs each request and its outcome using logInst.
+// panicInst is optional; pass nil to skip panic logging.
 func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) HandlerMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -41,9 +43,13 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Ha
 				if appErr.Internal != nil {
 					logger.AddInfo(ctx, "err_internal", appErr.Internal.Error())
 				}
-				logInst.Warning(ctx, "request completed with error")
+				if logInst != nil {
+					logInst.Warning(ctx, "request completed with error")
+				}
 			} else {
-				logInst.Info(ctx, "succ")
+				if logInst != nil {
+					logInst.Info(ctx, "succ")
+				}
 			}
 
 		})

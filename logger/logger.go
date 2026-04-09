@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -90,15 +91,19 @@ func parse(conf string) (*Config, error) {
 	if lConfig.MaxFileNum == 0 {
 		lConfig.MaxFileNum = 48
 	}
+	if lConfig.MinLevel == "" {
+		lConfig.MinLevel = "INFO"
+	}
 
 	return &lConfig, nil
 }
 
 func (c *Config) LogFileName() string {
-	if c.FileName == "" {
-		c.FileName = "app.log"
+	name := c.FileName
+	if name == "" {
+		name = "app.log"
 	}
-	return filepath.Join(c.Dir, c.FileName)
+	return filepath.Join(c.Dir, name)
 }
 
 func (c *Config) PanicFileName() string {
@@ -144,6 +149,15 @@ func NewLogger(loggerConfig ...string) (Logger, error) {
 
 	if logConf.Dir != "" && logConf.FileName != "" {
 		return NewTextLogger(logConf, opts)
+	}
+
+	// Warn when the config is partially set: the user likely intended file
+	// logging but forgot one of the required fields.
+	if logConf.Dir != "" || logConf.FileName != "" {
+		fmt.Fprintf(os.Stderr,
+			"golitekit/logger: both 'dir' and 'filename' must be set for file logging "+
+				"(dir=%q, filename=%q); falling back to console logger\n",
+			logConf.Dir, logConf.FileName)
 	}
 
 	return NewConsoleLogger(opts)

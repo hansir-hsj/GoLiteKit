@@ -29,7 +29,9 @@ func (c *RestController[T]) ServeData(ctx context.Context, data any) {
 		Data:   data,
 		LogID:  logID,
 	}
-	c.BaseController.ServeJSON(res)
+	if err := c.BaseController.ServeJSON(res); err != nil {
+		SetError(ctx, ErrInternal("failed to serialize response", err))
+	}
 }
 
 func (c *RestController[T]) ServeOK(ctx context.Context) {
@@ -48,7 +50,9 @@ func (c *RestController[T]) ServeMsgData(ctx context.Context, msg string, data a
 		Data:   data,
 		LogID:  logID,
 	}
-	c.BaseController.ServeJSON(res)
+	if err := c.BaseController.ServeJSON(res); err != nil {
+		SetError(ctx, ErrInternal("failed to serialize response", err))
+	}
 }
 
 func (c *RestController[T]) ServeError(ctx context.Context, status int, msg string) {
@@ -62,7 +66,9 @@ func (c *RestController[T]) ServeError(ctx context.Context, status int, msg stri
 		Msg:    msg,
 		LogID:  logID,
 	}
-	c.BaseController.ServeJSON(res)
+	if err := c.BaseController.ServeJSON(res); err != nil {
+		SetError(ctx, ErrInternal("failed to serialize response", err))
+	}
 }
 
 func (c *RestController[T]) ServeErrorMsg(ctx context.Context, msg string) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"time"
 
@@ -112,8 +113,22 @@ func (t *Tracker) Start(name string) {
 		t.stack[len(t.stack)-1].end()
 	}
 
+	// If this name is already tracked, generate a unique key so that both
+	// entries are preserved in t.services and neither timing is lost.
+	uniqueName := name
+	if _, exists := t.services[uniqueName]; exists {
+		for i := 2; ; i++ {
+			candidate := fmt.Sprintf("%s_%d", name, i)
+			if _, exists := t.services[candidate]; !exists {
+				uniqueName = candidate
+				break
+			}
+		}
+		st.name = uniqueName
+	}
+
 	t.stack = append(t.stack, st)
-	t.services[name] = st
+	t.services[uniqueName] = st
 }
 
 func (t *Tracker) End() {
@@ -132,16 +147,31 @@ func (t *Tracker) End() {
 }
 
 func (t *Tracker) LogTracker(ctx context.Context) {
-	t.totalCost = time.Since(t.startTime)
-	selfCost := t.totalCost
-
-	logger.AddInfo(ctx, "logid", t.LogID())
-
+	t.mu.Lock()
+	totalCost := time.Since(t.startTime)
+	t.totalCost = totalCost
+	logID := t.logID
+	// Copy service entries under the lock to avoid racing with Start().
+	services := make([]*serviceTracker, 0, len(t.services))
 	for _, s := range t.services {
+		services = append(services, s)
+	}
+	t.mu.Unlock()
+
+	selfCost := totalCost
+	logger.AddInfo(ctx, "logid", logID)
+
+	for _, s := range services {
 		selfCost -= s.cost
 		logger.AddInfo(ctx, s.name+"_t", s.cost.Milliseconds())
 	}
 
-	logger.AddInfo(ctx, "all_t", t.totalCost.Milliseconds())
+	// Clamp to zero: overlapping timers or clock precision can produce a small
+	// negative value, which would be misleading in the log.
+	if selfCost < 0 {
+		selfCost = 0
+	}
+
+	logger.AddInfo(ctx, "all_t", totalCost.Milliseconds())
 	logger.AddInfo(ctx, "self_t", selfCost.Milliseconds())
 }

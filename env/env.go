@@ -105,30 +105,51 @@ func Init(path string) error {
 }
 
 func AppName() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	return defaultEnv.AppName
 }
 
 func RunMode() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	return defaultEnv.RunMode
 }
 
 func Network() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	return defaultEnv.Network
 }
 
 func Addr() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	return defaultEnv.Addr
 }
 
 func RootDir() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	return defaultEnv.rootDir
 }
 
 func ConfDir() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	return defaultEnv.confDir
 }
 
 func StaticDir() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	if defaultEnv.StaticDir == "" {
 		return ""
 	}
@@ -136,6 +157,9 @@ func StaticDir() string {
 }
 
 func ReadTimeout() time.Duration {
+	if defaultEnv == nil {
+		return DefaultReadTimeout
+	}
 	if defaultEnv.ReadTimeout == 0 {
 		return DefaultReadTimeout
 	}
@@ -143,6 +167,9 @@ func ReadTimeout() time.Duration {
 }
 
 func ReadHeaderTimeout() time.Duration {
+	if defaultEnv == nil {
+		return DefaultReadHeaderTimeout
+	}
 	if defaultEnv.ReadHeaderTimeout == 0 {
 		return DefaultReadHeaderTimeout
 	}
@@ -150,6 +177,9 @@ func ReadHeaderTimeout() time.Duration {
 }
 
 func WriteTimeout() time.Duration {
+	if defaultEnv == nil {
+		return DefaultWriteTimeout
+	}
 	if defaultEnv.WriteTimeout == 0 {
 		return DefaultWriteTimeout
 	}
@@ -157,6 +187,9 @@ func WriteTimeout() time.Duration {
 }
 
 func IdleTimeout() time.Duration {
+	if defaultEnv == nil {
+		return DefaultIdleTimeout
+	}
 	if defaultEnv.IdleTimeout == 0 {
 		return DefaultIdleTimeout
 	}
@@ -164,6 +197,9 @@ func IdleTimeout() time.Duration {
 }
 
 func ShutdownTimeout() time.Duration {
+	if defaultEnv == nil {
+		return DefaultShutdownTimeout
+	}
 	if defaultEnv.ShutdownTimeout == 0 {
 		return DefaultShutdownTimeout
 	}
@@ -171,6 +207,9 @@ func ShutdownTimeout() time.Duration {
 }
 
 func MaxHeaderBytes() int {
+	if defaultEnv == nil {
+		return 1 << 20
+	}
 	if defaultEnv.MaxHeaderBytes == 0 {
 		return 1 << 20
 	}
@@ -178,10 +217,16 @@ func MaxHeaderBytes() int {
 }
 
 func RateLimit() int {
+	if defaultEnv == nil {
+		return 0
+	}
 	return defaultEnv.RateLimit
 }
 
 func RateBurst() int {
+	if defaultEnv == nil {
+		return 0
+	}
 	if defaultEnv.RateBurst == 0 {
 		return defaultEnv.RateLimit
 	}
@@ -189,6 +234,9 @@ func RateBurst() int {
 }
 
 func DBConfigFile() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	if defaultEnv.DB == "" {
 		return ""
 	}
@@ -196,6 +244,9 @@ func DBConfigFile() string {
 }
 
 func RedisConfigFile() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	if defaultEnv.Redis == "" {
 		return ""
 	}
@@ -203,6 +254,9 @@ func RedisConfigFile() string {
 }
 
 func LoggerConfigFile() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	if defaultEnv.Logger == "" {
 		return ""
 	}
@@ -210,10 +264,16 @@ func LoggerConfigFile() string {
 }
 
 func TLS() bool {
+	if defaultEnv == nil {
+		return false
+	}
 	return defaultEnv.TLS
 }
 
 func TLSCertFile() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	if defaultEnv.CertFile == "" {
 		return ""
 	}
@@ -221,6 +281,9 @@ func TLSCertFile() string {
 }
 
 func TLSKeyFile() string {
+	if defaultEnv == nil {
+		return ""
+	}
 	if defaultEnv.KeyFile == "" {
 		return ""
 	}
@@ -228,10 +291,16 @@ func TLSKeyFile() string {
 }
 
 func EnablePprof() bool {
+	if defaultEnv == nil {
+		return false
+	}
 	return defaultEnv.EnablePprof
 }
 
 func SSETimeout() time.Duration {
+	if defaultEnv == nil {
+		return 300 * time.Second
+	}
 	if defaultEnv.Timeout == 0 {
 		return 300 * time.Second
 	}
@@ -239,9 +308,15 @@ func SSETimeout() time.Duration {
 }
 
 func LogRequestBody() bool {
+	if defaultEnv == nil {
+		return false
+	}
 	return defaultEnv.LogRequestBody
 }
 
 func LogResponseBody() bool {
+	if defaultEnv == nil {
+		return false
+	}
 	return defaultEnv.LogResponseBody
 }

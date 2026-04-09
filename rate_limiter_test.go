@@ -132,9 +132,9 @@ func TestRateLimiter_TTL(t *testing.T) {
 		_ = rl.GetLimiter("user-1")
 
 		// Limiter should exist
-		rl.mu.RLock()
+		rl.mu.Lock()
 		_, exists := rl.limiters["user-1"]
-		rl.mu.RUnlock()
+		rl.mu.Unlock()
 		if !exists {
 			t.Error("limiter should exist immediately after creation")
 		}
@@ -143,9 +143,9 @@ func TestRateLimiter_TTL(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 
 		// Limiter should be removed
-		rl.mu.RLock()
+		rl.mu.Lock()
 		_, exists = rl.limiters["user-1"]
-		rl.mu.RUnlock()
+		rl.mu.Unlock()
 		if exists {
 			t.Error("limiter should be removed after TTL")
 		}
@@ -274,8 +274,10 @@ func TestByIP(t *testing.T) {
 	req.RemoteAddr = "192.168.1.100:54321"
 
 	key := ByIP(req)
-	if key != "192.168.1.100:54321" {
-		t.Errorf("key = %s, want 192.168.1.100:54321", key)
+	// ByIP strips the port so that all connections from the same client share
+	// one rate-limiter bucket regardless of the ephemeral port number.
+	if key != "192.168.1.100" {
+		t.Errorf("key = %s, want 192.168.1.100", key)
 	}
 }
 

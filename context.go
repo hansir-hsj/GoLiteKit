@@ -35,11 +35,12 @@ type Context struct {
 	rawResponse  any
 	jsonResponse any
 	rawHtml      string
+	statusCode   int
 
 	sseWriter *SSEWriter
 
 	data     map[string]any
-	dataLock sync.Mutex
+	dataLock sync.RWMutex
 }
 
 type SSEvent struct {
@@ -57,7 +58,6 @@ func NewSSEWriter(w http.ResponseWriter) *SSEWriter {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	return &SSEWriter{w: w}
 }
 
@@ -108,8 +108,8 @@ func SetContextData(ctx context.Context, key string, data any) {
 func GetContextData(ctx context.Context, key string) (any, bool) {
 	gcx := GetContext(ctx)
 	if gcx != nil {
-		gcx.dataLock.Lock()
-		defer gcx.dataLock.Unlock()
+		gcx.dataLock.RLock()
+		defer gcx.dataLock.RUnlock()
 		if v, ok := gcx.data[key]; ok {
 			return v, true
 		}
@@ -134,8 +134,8 @@ func (gcx *Context) setError(err *AppError) {
 func GetError(ctx context.Context) *AppError {
 	gcx := GetContext(ctx)
 	if gcx != nil {
-		gcx.dataLock.Lock()
-		defer gcx.dataLock.Unlock()
+		gcx.dataLock.RLock()
+		defer gcx.dataLock.RUnlock()
 		if v, ok := gcx.data[AppErrorKey]; ok {
 			if err, ok := v.(*AppError); ok {
 				return err
@@ -240,7 +240,7 @@ func (ctx *Context) ServeHTML(html string) {
 func ContextAsMiddleware() HandlerMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// execute handler chain
+			// Run the handler chain.
 			next.ServeHTTP(w, r)
 
 			ctx := r.Context()
@@ -249,13 +249,19 @@ func ContextAsMiddleware() HandlerMiddleware {
 				return
 			}
 
-			// if there are errors, do not write response, handle by ErrorHandlerMiddleware
+			// Skip response write on error; ErrorHandlerMiddleware handles it.
 			if HasError(ctx) {
 				return
 			}
 
+			statusCode := http.StatusOK
+			if gcx.statusCode != 0 {
+				statusCode = gcx.statusCode
+			}
+
 			if gcx.jsonResponse != nil {
 				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(statusCode)
 				if bytes, ok := gcx.jsonResponse.([]byte); ok {
 					w.Write(bytes)
 				} else {
@@ -270,9 +276,11 @@ func ContextAsMiddleware() HandlerMiddleware {
 				switch body := gcx.rawResponse.(type) {
 				case []byte:
 					w.Header().Set("Content-Type", "application/octet-stream")
+					w.WriteHeader(statusCode)
 					w.Write(body)
 				case string:
 					w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
+					w.WriteHeader(statusCode)
 					w.Write([]byte(body))
 				default:
 					SetError(ctx, ErrInternal("Unsupported response type", nil))
@@ -280,6 +288,7 @@ func ContextAsMiddleware() HandlerMiddleware {
 				}
 			} else if gcx.rawHtml != "" {
 				w.Header().Set("Content-Type", "text/html; charset=UTF-8")
+				w.WriteHeader(statusCode)
 				w.Write([]byte(gcx.rawHtml))
 			}
 		})
@@ -386,26 +395,31 @@ func (ctx *Context) Param(key string) string {
 }
 
 // JSON writes JSON response with status code.
+// The response is buffered and written via ContextAsMiddleware.
 func (ctx *Context) JSON(code int, data any) error {
-	ctx.responseWriter.Header().Set("Content-Type", "application/json")
-	ctx.responseWriter.WriteHeader(code)
-	return json.NewEncoder(ctx.responseWriter).Encode(data)
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	ctx.statusCode = code
+	ctx.jsonResponse = jsonData
+	return nil
 }
 
 // String writes plain text response with status code.
+// The response is buffered and written via ContextAsMiddleware.
 func (ctx *Context) String(code int, s string) error {
-	ctx.responseWriter.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	ctx.responseWriter.WriteHeader(code)
-	_, err := ctx.responseWriter.Write([]byte(s))
-	return err
+	ctx.statusCode = code
+	ctx.rawResponse = s
+	return nil
 }
 
 // HTML writes HTML response with status code.
+// The response is buffered and written via ContextAsMiddleware.
 func (ctx *Context) HTML(code int, html string) error {
-	ctx.responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
-	ctx.responseWriter.WriteHeader(code)
-	_, err := ctx.responseWriter.Write([]byte(html))
-	return err
+	ctx.statusCode = code
+	ctx.rawHtml = html
+	return nil
 }
 
 // Services returns the service container.

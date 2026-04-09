@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync"
 )
 
 type loggerCtxKey string
@@ -20,7 +21,12 @@ type Field struct {
 	Next  *Field
 }
 
+// LoggerContext holds per-request structured log fields that are attached to
+// every log record emitted within the request's context.  It is safe for
+// concurrent use: multiple goroutines (e.g. the handler goroutine and deferred
+// middleware cleanup after a timeout) may call add() and Handle() in parallel.
 type LoggerContext struct {
+	mu   sync.RWMutex
 	Head *Field
 }
 
@@ -47,9 +53,10 @@ func GetLoggerContext(ctx context.Context) *LoggerContext {
 }
 
 // Handle adds contextual attributes to the Record before calling the underlying
-// handler
+// handler.
 func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if logCtx, ok := ctx.Value(loggerKey).(*LoggerContext); ok {
+		logCtx.mu.RLock()
 		for node := logCtx.Head; node != nil; node = node.Next {
 			// skip lower level field
 			if node.Level < r.Level {
@@ -61,6 +68,7 @@ func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
 			}
 			r.AddAttrs(attr)
 		}
+		logCtx.mu.RUnlock()
 	}
 	return h.Handler.Handle(ctx, r)
 }
@@ -81,12 +89,16 @@ func (logCtx *LoggerContext) add(key string, value any, level slog.Level) {
 		return
 	}
 
+	logCtx.mu.Lock()
+	defer logCtx.mu.Unlock()
+
 	if logCtx.Head == nil {
 		logCtx.Head = &Field{
 			Level: level,
 			Key:   key,
 			Value: value,
 		}
+		return
 	}
 
 	var last *Field
@@ -130,8 +142,7 @@ func addLog(ctx context.Context, level slog.Level, key string, value any) {
 	lcx := ctx.Value(loggerKey)
 	logCtx, ok := lcx.(*LoggerContext)
 	if !ok {
-		// 静默失败，避免生产环境 panic
-		// 如需调试，可检查 ctx 是否通过 WithLoggerContext 初始化
+		// Fail silently: ctx was not initialized with WithLoggerContext.
 		return
 	}
 	logCtx.add(key, value, level)

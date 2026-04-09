@@ -35,7 +35,7 @@ func (l *ConsoleLogger) Fatal(ctx context.Context, msg string, args ...any) {
 }
 
 func (l *ConsoleLogger) Close() error {
-	// ConsoleLogger 输出到 stdout，无需关闭
+	// ConsoleLogger writes to stdout; nothing to close.
 	return nil
 }
 

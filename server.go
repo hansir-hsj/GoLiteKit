@@ -79,6 +79,7 @@ func (s *Server) Run(handler http.Handler) error {
 	if s.config.TLSCertFile != "" && s.config.TLSKeyFile != "" {
 		cert, err := tls.LoadX509KeyPair(s.config.TLSCertFile, s.config.TLSKeyFile)
 		if err != nil {
+			ln.Close()
 			return fmt.Errorf("load tls cert error: %w", err)
 		}
 		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
@@ -89,31 +90,33 @@ func (s *Server) Run(handler http.Handler) error {
 
 	s.listener = ln
 
-	errChan := make(chan error, 1)
+	serveChan := make(chan error, 1)
 	go func() {
 		if err := s.httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
-			errChan <- err
+			serveChan <- err
 		}
-		close(errChan)
+		close(serveChan)
 	}()
 
-	s.waitForShutdown()
-	return <-errChan
-}
-
-func (s *Server) waitForShutdown() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	sig := <-quit
+	defer signal.Stop(quit)
 
-	fmt.Fprintf(os.Stderr, "\n%s received signal %v, shutting down...\n", time.Now().Format(time.RFC3339), sig)
+	select {
+	case err := <-serveChan:
+		// Server crashed before receiving a shutdown signal.
+		return err
+	case sig := <-quit:
+		fmt.Fprintf(os.Stderr, "\n%s received signal %v, shutting down...\n", time.Now().Format(time.RFC3339), sig)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
 	defer cancel()
-
 	if err := s.httpServer.Shutdown(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "Server shutdown error: %v\n", err)
 	}
+
+	return <-serveChan
 }
 
 // Shutdown gracefully stops the server.

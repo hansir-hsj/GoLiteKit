@@ -197,6 +197,79 @@ func TestDeferredResponseWriter_Reset(t *testing.T) {
 	})
 }
 
+// ============================================================================
+// Flush / SSE streaming
+// ============================================================================
+
+func TestDeferredResponseWriter_Flush_CommitsOnFirstCall(t *testing.T) {
+	// First Flush must commit buffered headers and body to the real writer.
+	rec := httptest.NewRecorder()
+	dw := newDeferredResponseWriter(rec)
+
+	dw.Header().Set("Content-Type", "text/event-stream")
+	dw.WriteHeader(http.StatusOK)
+	dw.Write([]byte("data: hello\n\n"))
+
+	dw.Flush()
+
+	if !dw.IsFlushed() {
+		t.Error("IsFlushed should be true after Flush()")
+	}
+	if !dw.IsCommitted() {
+		t.Error("IsCommitted should be true after Flush()")
+	}
+	if rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", rec.Header().Get("Content-Type"))
+	}
+	if !containsStr(rec.Body.String(), "data: hello") {
+		t.Errorf("body = %q, expected SSE data", rec.Body.String())
+	}
+}
+
+func TestDeferredResponseWriter_Flush_PassThrough(t *testing.T) {
+	// Writes after the first Flush go directly to the real writer (no buffering).
+	rec := httptest.NewRecorder()
+	dw := newDeferredResponseWriter(rec)
+
+	dw.Flush() // commit empty buffer
+
+	dw.Write([]byte("streaming chunk"))
+
+	if !containsStr(rec.Body.String(), "streaming chunk") {
+		t.Errorf("body = %q, expected pass-through write", rec.Body.String())
+	}
+}
+
+func TestDeferredResponseWriter_Reset_IgnoredAfterFlush(t *testing.T) {
+	// Reset must be a no-op once data has been flushed to the real writer.
+	rec := httptest.NewRecorder()
+	dw := newDeferredResponseWriter(rec)
+
+	dw.Write([]byte("sent"))
+	dw.Flush()
+
+	// Reset should not clear flushed state.
+	dw.Reset()
+
+	if !dw.IsFlushed() {
+		t.Error("IsFlushed should remain true after attempted Reset")
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
+		func() bool {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+			return false
+		}())
+}
+
+// ============================================================================
+
 func TestResponseCapture(t *testing.T) {
 	t.Run("captures response body", func(t *testing.T) {
 		rec := httptest.NewRecorder()
