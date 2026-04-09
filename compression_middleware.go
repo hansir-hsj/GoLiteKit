@@ -43,9 +43,9 @@ func CompressionMiddleware(level ...int) HandlerMiddleware {
 
 			next.ServeHTTP(gzw, r)
 
-		// Close flushes remaining data into the gzip stream.
-		// Errors here may truncate the client response; log to stderr
-		// because the response header is already committed.
+			// Close flushes remaining data into the gzip stream.
+			// Errors here may truncate the client response; log to stderr
+			// because the response header is already committed.
 			if err := gz.Close(); err != nil {
 				fmt.Fprintf(os.Stderr, "gzip close error: %v\n", err)
 			}
