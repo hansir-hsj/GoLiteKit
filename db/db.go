@@ -52,6 +52,13 @@ func parse(conf string) (*Config, error) {
 	}
 
 	if dbConfig.DSN == "" {
+		// Only include charset when explicitly configured; an empty value causes
+		// "unknown charset" errors on some MySQL server versions.
+		params := map[string]string{}
+		if dbConfig.Charset != "" {
+			params["charset"] = dbConfig.Charset
+		}
+
 		mysqlConfig := mysql.Config{
 			User:                 dbConfig.Username,
 			Passwd:               dbConfig.Password,
@@ -62,9 +69,7 @@ func parse(conf string) (*Config, error) {
 			ReadTimeout:          time.Duration(dbConfig.ReadTimeout) * time.Millisecond,
 			WriteTimeout:         time.Duration(dbConfig.WriteTimeout) * time.Millisecond,
 			AllowNativePasswords: true,
-			Params: map[string]string{
-				"charset": dbConfig.Charset,
-			},
+			Params:               params,
 		}
 		dbConfig.DSN = mysqlConfig.FormatDSN()
 	}

@@ -31,6 +31,7 @@ type RequestSizeLimiter interface {
 // NoBody indicates the controller does not need request body parsing.
 type NoBody struct{}
 
+// Controller is the interface every request handler must implement.
 type Controller interface {
 	RequestSizeLimiter
 
@@ -60,6 +61,9 @@ func (c *BaseController[T]) MaxBodySize() int64 {
 
 func (c *BaseController[T]) Init(ctx context.Context) error {
 	c.gcx = GetContext(ctx)
+	if c.gcx == nil {
+		return fmt.Errorf("golitekit: context not initialized; ensure WithContext is called before the controller")
+	}
 	c.request = c.gcx.Request()
 	c.logger = c.gcx.logger
 
@@ -192,6 +196,18 @@ func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) err
 		boolVal := value == "1" || strings.ToLower(value) == "true"
 		field.SetBool(boolVal)
 
+	case reflect.Ptr:
+		// Allocate a new value of the pointed-to type, parse the string into it,
+		// then point the field at the new value.  This supports optional fields
+		// declared as *string, *int64, *bool, etc.
+		elem := reflect.New(field.Type().Elem()).Elem()
+		if err := c.setFieldValue(elem, value); err != nil {
+			return err
+		}
+		ptr := reflect.New(field.Type().Elem())
+		ptr.Elem().Set(elem)
+		field.Set(ptr)
+
 	default:
 		return fmt.Errorf("unsupported field type: %v", field.Kind())
 	}
@@ -303,11 +319,11 @@ func (c *BaseController[T]) GetRequest() T {
 func (c *BaseController[T]) parseBody() error {
 	maxMemorySize := c.MaxMemorySize()
 	if maxMemorySize <= 0 {
-		maxMemorySize = DefaultMaxMemorySize // 10M
+		maxMemorySize = DefaultMaxMemorySize
 	}
 	maxBodySize := c.MaxBodySize()
 	if maxBodySize <= 0 {
-		maxBodySize = DefaultMaxBodySize // 10M
+		maxBodySize = DefaultMaxBodySize
 	}
 
 	httpReq := c.request
@@ -324,13 +340,13 @@ func (c *BaseController[T]) parseBody() error {
 	default:
 		if httpReq.Body != nil {
 			originBody := httpReq.Body
+			defer originBody.Close() // registered before ReadAll; fires even on read error
 			var rawBody []byte
 			rawBody, err = io.ReadAll(originBody)
 			if err != nil {
 				return err
 			}
 			c.gcx.RawBody = rawBody
-			defer originBody.Close()
 			httpReq.Body = io.NopCloser(bytes.NewBuffer(rawBody))
 		}
 	}
@@ -426,7 +442,10 @@ func (c *BaseController[T]) forms() (map[string][]string, error) {
 	case "application/x-www-form-urlencoded":
 		return c.request.Form, nil
 	case "multipart/form-data":
-		return c.request.PostForm, nil
+		if c.request.MultipartForm != nil {
+			return c.request.MultipartForm.Value, nil
+		}
+		return nil, nil
 	}
 	return nil, nil
 }
@@ -580,23 +599,33 @@ func (c *BaseController[T]) AddFatal(ctx context.Context, key string, value any)
 }
 
 func (c *BaseController[T]) Debug(ctx context.Context, format string, args ...any) {
-	c.logger.Debug(ctx, format, args...)
+	if c.logger != nil {
+		c.logger.Debug(ctx, format, args...)
+	}
 }
 
 func (c *BaseController[T]) Trace(ctx context.Context, format string, args ...any) {
-	c.logger.Trace(ctx, format, args...)
+	if c.logger != nil {
+		c.logger.Trace(ctx, format, args...)
+	}
 }
 
 func (c *BaseController[T]) Info(ctx context.Context, format string, args ...any) {
-	c.logger.Info(ctx, format, args...)
+	if c.logger != nil {
+		c.logger.Info(ctx, format, args...)
+	}
 }
 
 func (c *BaseController[T]) Warning(ctx context.Context, format string, args ...any) {
-	c.logger.Warning(ctx, format, args...)
+	if c.logger != nil {
+		c.logger.Warning(ctx, format, args...)
+	}
 }
 
 func (c *BaseController[T]) Fatal(ctx context.Context, format string, args ...any) {
-	c.logger.Fatal(ctx, format, args...)
+	if c.logger != nil {
+		c.logger.Fatal(ctx, format, args...)
+	}
 }
 
 func (c *BaseController[T]) SendSSE(event SSEvent) error {
@@ -614,6 +643,7 @@ func (c *BaseController[T]) SendSSEEvent(eventType string, data interface{}) err
 	})
 }
 
+// CloneController returns a deep copy of src, skipping sync primitives and channels.
 func CloneController(src Controller) Controller {
 	srcValue := reflect.ValueOf(src)
 	if srcValue.Kind() == reflect.Ptr {
@@ -654,7 +684,12 @@ func deepCopyValue(src reflect.Value) reflect.Value {
 			return reflect.Zero(src.Type())
 		}
 		dst := reflect.New(src.Type().Elem())
-		copyFields(src.Elem(), dst.Elem())
+		if src.Type().Elem().Kind() == reflect.Struct {
+			copyFields(src.Elem(), dst.Elem())
+		} else {
+			// Pointer to a primitive or non-struct type: copy the value directly.
+			dst.Elem().Set(src.Elem())
+		}
 		return dst
 
 	case reflect.Interface:
@@ -722,12 +757,12 @@ func copyFields(src, dst reflect.Value) {
 			continue
 		}
 
-		// Skip sync types
+		// Skip sync primitives.
 		if isSyncType(fieldType.Type) {
 			continue
 		}
 
-		// Check if struct contains sync types
+		// If the struct embeds sync types, copy its fields individually.
 		if srcField.Kind() == reflect.Struct && containsSyncType(fieldType.Type) {
 			copyFields(srcField, dstField)
 			continue
@@ -749,12 +784,17 @@ func copyFields(src, dst reflect.Value) {
 			if srcField.IsNil() {
 				continue
 			}
-			// Check if pointing to a sync type
-			if isSyncType(srcField.Type().Elem()) {
+		// Skip pointers to sync primitives.
+		if isSyncType(srcField.Type().Elem()) {
 				continue
 			}
 			newPtr := reflect.New(srcField.Type().Elem())
-			copyFields(srcField.Elem(), newPtr.Elem())
+			if srcField.Type().Elem().Kind() == reflect.Struct {
+				copyFields(srcField.Elem(), newPtr.Elem())
+			} else {
+				// Pointer to a primitive or non-struct type: copy the value directly.
+				newPtr.Elem().Set(srcField.Elem())
+			}
 			dstField.Set(newPtr)
 
 		case reflect.Slice:

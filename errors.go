@@ -5,12 +5,14 @@ import (
 	"net/http"
 )
 
+// AppError is an HTTP error with a status code, message, and optional internal cause.
 type AppError struct {
 	Code     int    `json:"code"`
 	Message  string `json:"message"`
 	Internal error  `json:"-"`
 }
 
+// Error implements the error interface.
 func (e *AppError) Error() string {
 	if e.Internal != nil {
 		return fmt.Sprintf("%s: %v", e.Message, e.Internal)
@@ -18,6 +20,7 @@ func (e *AppError) Error() string {
 	return e.Message
 }
 
+// ErrBadRequest returns a 400 AppError.
 func ErrBadRequest(msg string, internal error) *AppError {
 	return &AppError{
 		Code:     http.StatusBadRequest,
@@ -26,6 +29,7 @@ func ErrBadRequest(msg string, internal error) *AppError {
 	}
 }
 
+// ErrUnauthorized returns a 401 AppError.
 func ErrUnauthorized(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusUnauthorized,
@@ -33,6 +37,7 @@ func ErrUnauthorized(msg string) *AppError {
 	}
 }
 
+// ErrForbidden returns a 403 AppError.
 func ErrForbidden(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusForbidden,
@@ -40,6 +45,7 @@ func ErrForbidden(msg string) *AppError {
 	}
 }
 
+// ErrNotFound returns a 404 AppError.
 func ErrNotFound(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusNotFound,
@@ -47,6 +53,7 @@ func ErrNotFound(msg string) *AppError {
 	}
 }
 
+// ErrMethodNotAllowed returns a 405 AppError.
 func ErrMethodNotAllowed(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusMethodNotAllowed,
@@ -54,6 +61,7 @@ func ErrMethodNotAllowed(msg string) *AppError {
 	}
 }
 
+// ErrConflict returns a 409 AppError.
 func ErrConflict(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusConflict,
@@ -61,6 +69,7 @@ func ErrConflict(msg string) *AppError {
 	}
 }
 
+// ErrTooManyRequests returns a 429 AppError.
 func ErrTooManyRequests(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusTooManyRequests,
@@ -68,6 +77,7 @@ func ErrTooManyRequests(msg string) *AppError {
 	}
 }
 
+// ErrTimeout returns a 408 AppError.
 func ErrTimeout(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusRequestTimeout,
@@ -75,6 +85,7 @@ func ErrTimeout(msg string) *AppError {
 	}
 }
 
+// ErrInternal returns a 500 AppError with an optional internal cause.
 func ErrInternal(msg string, internal error) *AppError {
 	return &AppError{
 		Code:     http.StatusInternalServerError,
@@ -83,6 +94,7 @@ func ErrInternal(msg string, internal error) *AppError {
 	}
 }
 
+// ErrServiceUnavailable returns a 503 AppError.
 func ErrServiceUnavailable(msg string) *AppError {
 	return &AppError{
 		Code:    http.StatusServiceUnavailable,
@@ -90,6 +102,7 @@ func ErrServiceUnavailable(msg string) *AppError {
 	}
 }
 
+// NewAppError returns an AppError with a custom status code.
 func NewAppError(code int, msg string, internal error) *AppError {
 	return &AppError{
 		Code:     code,

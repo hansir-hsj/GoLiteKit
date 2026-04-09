@@ -81,23 +81,33 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 			cloned := CloneController(c)
 
 			if err := cloned.Init(ctx); err != nil {
-				SetError(ctx, ErrInternal("Controller init failed", err))
+				if !HasError(ctx) {
+					SetError(ctx, ErrInternal("Controller init failed", err))
+				}
 				return
 			}
 			if err := cloned.SanityCheck(ctx); err != nil {
-				SetError(ctx, ErrBadRequest("Sanity check failed", err))
+				if !HasError(ctx) {
+					SetError(ctx, ErrBadRequest("Sanity check failed", err))
+				}
 				return
 			}
 			if err := cloned.ParseRequest(ctx, gcx.RawBody); err != nil {
-				SetError(ctx, ErrBadRequest("Parse request failed", err))
+				if !HasError(ctx) {
+					SetError(ctx, ErrBadRequest("Parse request failed", err))
+				}
 				return
 			}
 			if err := cloned.Serve(ctx); err != nil {
-				SetError(ctx, ErrInternal("Controller serve failed", err))
+				if !HasError(ctx) {
+					SetError(ctx, ErrInternal("Controller serve failed", err))
+				}
 				return
 			}
 			if err := cloned.Finalize(ctx); err != nil {
-				SetError(ctx, ErrInternal("Controller finalize failed", err))
+				if !HasError(ctx) {
+					SetError(ctx, ErrInternal("Controller finalize failed", err))
+				}
 				return
 			}
 		})

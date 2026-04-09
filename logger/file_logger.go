@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -152,18 +152,44 @@ func (l *FileLogger) NeedRotate() bool {
 }
 
 // rotate performs the actual rotation.
+// If any step fails the logger always ends up with a valid open file handle
+// so that subsequent log calls do not write to a closed fd.
 func (l *FileLogger) rotate() error {
 	newFilePath := l.newFilePath(l.LastRotate)
 
 	if err := l.file.Close(); err != nil {
-		return err
+		// Could not close the current file. Reopen it so the handle stays valid.
+		f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if openErr == nil {
+			l.file = f
+			handler := newContextHandler(f, l.logConf.Format, l.opts)
+			l.logger = slog.New(handler)
+		}
+		return fmt.Errorf("rotate: close failed: %w", err)
 	}
+
 	if err := os.Rename(l.filePath, newFilePath); err != nil {
-		return err
+		// Rename failed; reopen the original file so we can keep logging.
+		f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if openErr == nil {
+			l.file = f
+			handler := newContextHandler(f, l.logConf.Format, l.opts)
+			l.logger = slog.New(handler)
+		}
+		return fmt.Errorf("rotate: rename failed: %w", err)
 	}
+
 	newTarget, err := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		// New file could not be created; try to reopen the renamed file to
+		// preserve any ability to log rather than crash.
+		f, openErr := os.OpenFile(newFilePath, os.O_APPEND|os.O_WRONLY, 0644)
+		if openErr == nil {
+			l.file = f
+			handler := newContextHandler(f, l.logConf.Format, l.opts)
+			l.logger = slog.New(handler)
+		}
+		return fmt.Errorf("rotate: open new file failed: %w", err)
 	}
 
 	l.file = newTarget
@@ -240,18 +266,37 @@ func isDigits(s string) bool {
 }
 
 // sortFilesByModTime sorts files by modification time (oldest first).
+// It pre-fetches all Info() results in a single pass to avoid the O(n²)
+// syscall cost of calling Info() inside a nested comparison loop.
 func sortFilesByModTime(dir string, files []os.DirEntry) {
-	for i := 0; i < len(files)-1; i++ {
-		for j := i + 1; j < len(files); j++ {
-			infoI, errI := files[i].Info()
-			infoJ, errJ := files[j].Info()
-			if errI != nil || errJ != nil {
-				continue
-			}
-			if infoI.ModTime().After(infoJ.ModTime()) {
-				files[i], files[j] = files[j], files[i]
-			}
+	type entryWithTime struct {
+		entry   os.DirEntry
+		modTime time.Time
+		valid   bool
+	}
+
+	infos := make([]entryWithTime, len(files))
+	for i, f := range files {
+		info, err := f.Info()
+		if err == nil {
+			infos[i] = entryWithTime{entry: f, modTime: info.ModTime(), valid: true}
+		} else {
+			infos[i] = entryWithTime{entry: f, valid: false}
 		}
+	}
+
+	sort.Slice(infos, func(i, j int) bool {
+		if !infos[i].valid {
+			return false
+		}
+		if !infos[j].valid {
+			return true
+		}
+		return infos[i].modTime.Before(infos[j].modTime)
+	})
+
+	for i, info := range infos {
+		files[i] = info.entry
 	}
 }
 
@@ -340,12 +385,17 @@ func (l *FileLogger) logit(ctx context.Context, level slog.Level, format string,
 }
 
 func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if !l.logger.Enabled(ctx, level) {
 		return
 	}
 
-	if err := l.rotateIfNeeded(); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to rotate log file: %v\n", err)
+	if l.needRotate() {
+		if err := l.rotate(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to rotate log file: %v\n", err)
+		}
 	}
 
 	if err := logRecord(ctx, l.logger.Handler(), level, msg, 5, args...); err != nil {
@@ -353,5 +403,6 @@ func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args
 		return
 	}
 
-	atomic.AddInt64(&l.lines, 1)
+	// l.mu is already held exclusively here; a plain increment is sufficient.
+	l.lines++
 }

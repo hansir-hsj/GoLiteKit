@@ -13,18 +13,21 @@ type errorHandlerConfig struct {
 
 type ErrorHandlerOption func(*errorHandlerConfig)
 
+// WithErrorFormatter sets a custom function to render AppError responses.
 func WithErrorFormatter(f func(w http.ResponseWriter, err *AppError, logID string)) ErrorHandlerOption {
 	return func(c *errorHandlerConfig) {
 		c.formatter = f
 	}
 }
 
+// WithErrorCallback sets a hook called after every AppError is handled.
 func WithErrorCallback(f func(r *http.Request, err *AppError)) ErrorHandlerOption {
 	return func(c *errorHandlerConfig) {
 		c.onError = f
 	}
 }
 
+// WithPanicCallback sets a hook called when a panic is recovered.
 func WithPanicCallback(f func(r *http.Request, recovered any)) ErrorHandlerOption {
 	return func(c *errorHandlerConfig) {
 		c.onPanic = f
@@ -54,7 +57,7 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 
 			ctx := r.Context()
 
-			if appErr := GetError(ctx); appErr != nil {
+			if appErr := GetError(ctx); appErr != nil && !dw.IsFlushed() {
 				dw.Reset()
 				handleAppError(w, r, appErr, cfg)
 				return

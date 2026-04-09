@@ -117,9 +117,12 @@ func CreateApp(cmd *cobra.Command, args []string) {
 			fmt.Printf("parse tpl file %s failed: %s\n", path, err)
 			return err
 		}
-		parser.Execute(dstFile, map[string]any{
+		if err := parser.Execute(dstFile, map[string]any{
 			"App": name,
-		})
+		}); err != nil {
+			fmt.Printf("execute tpl file %s failed: %s\n", path, err)
+			return err
+		}
 
 		return nil
 	})

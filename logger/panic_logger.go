@@ -29,7 +29,7 @@ func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 		if err != nil {
 			return nil, err
 		}
-		filePath = filepath.Join(dir, "/log/panic.log")
+		filePath = filepath.Join(dir, "log", "panic.log")
 		logConf = &Config{
 			LoggerConfig: LoggerConfig{
 				RotateRule: "1day",
@@ -43,6 +43,11 @@ func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 			return nil, err
 		}
 		filePath = logConf.PanicFileName()
+	}
+
+	// Ensure the parent directory exists before opening the file.
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create panic log directory: %w", err)
 	}
 
 	// Rotate existing file if needed
@@ -101,18 +106,34 @@ func (l *PanicLogger) needRotate() bool {
 }
 
 // rotate performs the actual rotation.
+// On partial failure the logger always recovers to a valid open file handle so
+// that subsequent Report() calls do not write to a closed fd.
 func (l *PanicLogger) rotate() error {
 	newFilePath := l.newFilePath(l.lastRotate)
 
 	if err := l.file.Close(); err != nil {
-		return err
+		// Reopen the original file so logging can continue.
+		if f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
+			l.file = f
+		}
+		return fmt.Errorf("rotate: close failed: %w", err)
 	}
+
 	if err := os.Rename(l.filePath, newFilePath); err != nil {
-		return err
+		// Rename failed; reopen the original path.
+		if f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
+			l.file = f
+		}
+		return fmt.Errorf("rotate: rename failed: %w", err)
 	}
+
 	newTarget, err := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		// New file could not be created; fall back to the renamed archive file.
+		if f, openErr := os.OpenFile(newFilePath, os.O_APPEND|os.O_WRONLY, 0644); openErr == nil {
+			l.file = f
+		}
+		return fmt.Errorf("rotate: open new file failed: %w", err)
 	}
 
 	l.file = newTarget

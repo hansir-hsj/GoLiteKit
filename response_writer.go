@@ -96,6 +96,7 @@ type deferredResponseWriter struct {
 	header          http.Header
 	statusCode      int
 	isCommitted     bool
+	isFlushed       bool // true once data has been committed to the real writer via Flush
 	isHeaderWritten bool
 	mu              sync.Mutex
 }
@@ -167,6 +168,11 @@ func (d *deferredResponseWriter) Reset() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	if d.isFlushed {
+		// Data already sent to the real writer; cannot undo.
+		return
+	}
+
 	d.buffer.Reset()
 	d.header = make(http.Header)
 	d.statusCode = http.StatusOK
@@ -199,13 +205,31 @@ func (d *deferredResponseWriter) Flush() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if !d.isCommitted {
-		return
+	if !d.isFlushed {
+		// First flush: commit buffered headers/body and switch to streaming pass-through.
+		d.isFlushed = true
+		d.isCommitted = true
+		for k, v := range d.header {
+			for _, vv := range v {
+				d.ResponseWriter.Header().Add(k, vv)
+			}
+		}
+		d.ResponseWriter.WriteHeader(d.statusCode)
+		if d.buffer.Len() > 0 {
+			_, _ = d.ResponseWriter.Write(d.buffer.Bytes())
+			d.buffer.Reset()
+		}
 	}
 
 	if f, ok := d.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+func (d *deferredResponseWriter) IsFlushed() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.isFlushed
 }
 
 func (d *deferredResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/config"
 	"github.com/hansir-hsj/GoLiteKit/env"
@@ -50,9 +51,33 @@ func parse(conf string) (*Config, error) {
 
 	options := redis.Options{
 		Addr:     fmt.Sprintf("%s:%d", redisConfig.Host, redisConfig.Port),
+		Username: redisConfig.RConfig.Username,
 		Password: redisConfig.RConfig.Password,
 		DB:       redisConfig.RConfig.DB,
 	}
+
+	if redisConfig.RConfigTimeout.DialTimeout > 0 {
+		options.DialTimeout = time.Duration(redisConfig.RConfigTimeout.DialTimeout) * time.Millisecond
+	}
+	if redisConfig.RConfigTimeout.ReadTimeout > 0 {
+		options.ReadTimeout = time.Duration(redisConfig.RConfigTimeout.ReadTimeout) * time.Millisecond
+	}
+	if redisConfig.RConfigTimeout.WriteTimeout > 0 {
+		options.WriteTimeout = time.Duration(redisConfig.RConfigTimeout.WriteTimeout) * time.Millisecond
+	}
+	if redisConfig.RConfigTimeout.PoolTimeout > 0 {
+		options.PoolTimeout = time.Duration(redisConfig.RConfigTimeout.PoolTimeout) * time.Millisecond
+	}
+	if redisConfig.RConfigConn.PoolSize > 0 {
+		options.PoolSize = redisConfig.RConfigConn.PoolSize
+	}
+	if redisConfig.RConfigConn.MinIdleConns > 0 {
+		options.MinIdleConns = redisConfig.RConfigConn.MinIdleConns
+	}
+	if redisConfig.RConfigConn.MaxIdleConns > 0 {
+		options.MaxIdleConns = redisConfig.RConfigConn.MaxIdleConns
+	}
+
 	redisConfig.Options = options
 
 	return &redisConfig, nil

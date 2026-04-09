@@ -9,12 +9,14 @@ import (
 )
 
 func main() {
-	server, err := kit.New("conf/app.toml")
+	app, err := kit.NewAppFromConfig("conf/app.toml")
 	if err != nil {
-		log.Fatalf("Failed to create server: %v", err)
+		log.Fatalf("Failed to create app: %v", err)
 	}
-	server.OnGet("/hello", &controller.HelloController{})
-	if err := server.Start(); err != nil {
+
+	app.GET("/hello", &controller.HelloController{})
+
+	if err := app.RunFromEnv(); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }

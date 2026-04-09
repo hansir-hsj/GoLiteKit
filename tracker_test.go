@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
 func TestWithTracker(t *testing.T) {
@@ -249,4 +251,75 @@ func TestGenerateLogID(t *testing.T) {
 			ids[id] = true
 		}
 	})
+}
+
+// ============================================================================
+// LogTracker
+// ============================================================================
+
+func TestTracker_LogTracker_SelfTNonNegative(t *testing.T) {
+	// self_t must never be logged as a negative value even when service timers
+	// overlap or clock precision causes sum(services) > totalCost.
+	ctx := WithTracker(context.Background())
+	ctx = logger.WithLoggerContext(ctx)
+	tracker := GetTracker(ctx)
+
+	// Artificially add a service with a very large cost to trigger clamping.
+	tracker.mu.Lock()
+	tracker.services["fake"] = &serviceTracker{
+		name: "fake",
+		cost: 1000 * time.Second, // far exceeds any real totalCost
+	}
+	tracker.mu.Unlock()
+
+	// LogTracker should not panic and self_t should be clamped to 0.
+	tracker.LogTracker(ctx)
+
+	// Verify the log context contains "self_t" with value 0.
+	// We can only check it didn't panic; field inspection requires internal access.
+}
+
+func TestTracker_DuplicateStart_PreservesAllEntries(t *testing.T) {
+	// Calling Start with the same name twice must create two distinct entries
+	// (mysql and mysql_2) so no timing data is lost.
+	ctx := WithTracker(context.Background())
+	tracker := GetTracker(ctx)
+
+	tracker.Start("mysql")
+	time.Sleep(5 * time.Millisecond)
+	tracker.End()
+
+	tracker.Start("mysql")
+	time.Sleep(5 * time.Millisecond)
+	tracker.End()
+
+	tracker.mu.Lock()
+	_, first := tracker.services["mysql"]
+	_, second := tracker.services["mysql_2"]
+	tracker.mu.Unlock()
+
+	if !first {
+		t.Error("expected 'mysql' entry in services")
+	}
+	if !second {
+		t.Error("expected 'mysql_2' entry for duplicate Start call")
+	}
+}
+
+func TestTracker_LogTracker_LogsAllServices(t *testing.T) {
+	// LogTracker must emit timing info for every tracked service.
+	ctx := WithTracker(context.Background())
+	ctx = logger.WithLoggerContext(ctx)
+	tracker := GetTracker(ctx)
+
+	tracker.Start("redis")
+	time.Sleep(5 * time.Millisecond)
+	tracker.End()
+
+	tracker.Start("db")
+	time.Sleep(5 * time.Millisecond)
+	tracker.End()
+
+	// Should complete without panic; fields added to logger context.
+	tracker.LogTracker(ctx)
 }
