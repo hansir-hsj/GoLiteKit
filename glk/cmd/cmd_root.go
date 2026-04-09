@@ -9,7 +9,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "glk",
-	Short: "glk is a CLI tool fro GoLiteKit",
+	Short: "glk is a CLI tool for GoLiteKit",
 	Long:  "glk is a CLI tool for GoLiteKit",
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
@@ -25,4 +25,6 @@ func Execute() {
 
 func init() {
 	rootCmd.AddCommand(newCmd)
+	rootCmd.AddCommand(addCmd)
+	rootCmd.AddCommand(versionCmd)
 }
