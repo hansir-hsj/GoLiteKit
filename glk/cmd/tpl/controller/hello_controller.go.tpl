@@ -11,6 +11,5 @@ type HelloController struct {
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {
-	c.ServeRawData("Hello, GoLiteKit!")
-	return nil
+	return c.ServeJSON(map[string]string{"message": "Hello, GoLiteKit!"})
 }

@@ -5,18 +5,18 @@ import (
 
 	kit "github.com/hansir-hsj/GoLiteKit"
 
-	"{{.App}}/controller"
+	"{{.Module}}/controller"
 )
 
 func main() {
 	app, err := kit.NewAppFromConfig("conf/app.toml")
 	if err != nil {
-		log.Fatalf("Failed to create app: %v", err)
+		log.Fatalf("failed to create app: %v", err)
 	}
 
 	app.GET("/hello", &controller.HelloController{})
 
 	if err := app.RunFromEnv(); err != nil {
-		log.Fatalf("Server error: %v", err)
+		log.Fatalf("server error: %v", err)
 	}
 }

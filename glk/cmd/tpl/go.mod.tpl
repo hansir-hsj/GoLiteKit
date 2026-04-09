@@ -1,3 +1,3 @@
-module {{.App}}
+module {{.Module}}
 
 go 1.22
