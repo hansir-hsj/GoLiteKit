@@ -90,8 +90,8 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 				services.logger.Warning(r.Context(), "request error: %d %s", err.Code, err.Message)
 			}),
 			WithPanicCallback(func(r *http.Request, recovered any) {
-			services.panicLogger.Report(r.Context(), recovered)
-		}),
+				services.panicLogger.Report(r.Context(), recovered)
+			}),
 		),
 		LoggerAsMiddleware(services.logger, services.panicLogger),
 		TrackerMiddleware(),

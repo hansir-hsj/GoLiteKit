@@ -98,21 +98,20 @@ func (c *BaseController[T]) ParseRequest(ctx context.Context, body []byte) error
 		return nil
 	}
 
+	ct := c.request.Header.Get("Content-Type")
+
+	// Form types: parseBody already called ParseForm/ParseMultipartForm,
+	// so data is in request.Form — bind directly without checking body.
+	if strings.Contains(ct, "application/x-www-form-urlencoded") ||
+		strings.Contains(ct, "multipart/form-data") {
+		return c.bindFormData(&c.Request)
+	}
+
+	// For all other types (JSON, etc.) rely on the raw body bytes.
 	if len(body) == 0 {
 		return nil
 	}
-
-	ct := c.request.Header.Get("Content-Type")
-	switch {
-	case strings.Contains(ct, "application/json"):
-		return json.Unmarshal(body, &c.Request)
-	case strings.Contains(ct, "application/x-www-form-urlencoded"):
-		return c.bindFormData(&c.Request)
-	case strings.Contains(ct, "multipart/form-data"):
-		return c.bindFormData(&c.Request)
-	default:
-		return json.Unmarshal(body, &c.Request)
-	}
+	return json.Unmarshal(body, &c.Request)
 }
 
 // bindFormData binds form data to a struct.
@@ -784,8 +783,8 @@ func copyFields(src, dst reflect.Value) {
 			if srcField.IsNil() {
 				continue
 			}
-		// Skip pointers to sync primitives.
-		if isSyncType(srcField.Type().Elem()) {
+			// Skip pointers to sync primitives.
+			if isSyncType(srcField.Type().Elem()) {
 				continue
 			}
 			newPtr := reflect.New(srcField.Type().Elem())

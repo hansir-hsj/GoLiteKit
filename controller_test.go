@@ -146,10 +146,9 @@ func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// For form-urlencoded, parseBody calls ParseForm and does not populate RawBody.
-	// bindFormData reads directly from c.request.Form (populated by ParseForm).
-	if err := c.bindFormData(&c.Request); err != nil {
-		t.Fatalf("bindFormData: %v", err)
+	// parseBody calls ParseForm; ParseRequest now binds directly from request.Form.
+	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
+		t.Fatalf("ParseRequest: %v", err)
 	}
 
 	if c.Request.Username != "bob" {
@@ -184,10 +183,9 @@ func TestSetFieldValue_PointerToString(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// Call bindFormData directly: for form-urlencoded RawBody is empty so
-	// ParseRequest would return early before reaching bindFormData.
-	if err := c.bindFormData(&c.Request); err != nil {
-		t.Fatalf("bindFormData: %v", err)
+	// ParseRequest now handles form types correctly without relying on RawBody.
+	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
+		t.Fatalf("ParseRequest: %v", err)
 	}
 
 	if c.Request.Tag == nil {
