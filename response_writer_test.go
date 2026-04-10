@@ -6,6 +6,26 @@ import (
 	"testing"
 )
 
+// Test helpers: expose internal deferredResponseWriter state for assertions.
+
+func (d *deferredResponseWriter) Buffer() []byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.buffer.Bytes()
+}
+
+func (d *deferredResponseWriter) StatusCode() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.statusCode
+}
+
+func (d *deferredResponseWriter) IsCommitted() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.isCommitted
+}
+
 func TestDeferredResponseWriter_Write(t *testing.T) {
 	t.Run("buffers write before commit", func(t *testing.T) {
 		rec := httptest.NewRecorder()

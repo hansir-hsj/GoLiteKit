@@ -1,7 +1,9 @@
 package golitekit
 
 import (
+	"encoding/json"
 	"net/http"
+	"reflect"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
@@ -55,7 +57,10 @@ func (r *Router) handle(method, path string, c Controller, groupMiddlewares Midd
 			if h, ok := r.methodHandlers[path][req.Method]; ok {
 				h.ServeHTTP(w, req)
 			} else {
-				http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+				appErr := ErrMethodNotAllowed("Method Not Allowed")
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(appErr.Code)
+				json.NewEncoder(w).Encode(Response{Status: appErr.Code, Msg: appErr.Message})
 			}
 		})
 	}
@@ -64,8 +69,12 @@ func (r *Router) handle(method, path string, c Controller, groupMiddlewares Midd
 }
 
 func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) http.Handler {
+	// Extract the concrete type once at registration time.
+	// Per request, reflect.New allocates a fresh zero-value instance — no deep copy needed.
+	t := reflect.TypeOf(c).Elem()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ctx := newContext(w, req, r.services)
+		ctx := newContext(req)
 		ctx = logger.WithLoggerContext(ctx)
 		req = req.WithContext(ctx)
 
@@ -73,38 +82,38 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 		gcx.SetContextOptions(
 			WithRequest(req),
 			WithResponseWriter(w),
-			_WithServices(r.services),
+			withServices(r.services),
 		)
 
 		controllerHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			ctx := req.Context()
-			cloned := CloneController(c)
+			handler := reflect.New(t).Interface().(Controller)
 
-			if err := cloned.Init(ctx); err != nil {
+			if err := handler.Init(ctx); err != nil {
 				if !HasError(ctx) {
 					SetError(ctx, ErrInternal("Controller init failed", err))
 				}
 				return
 			}
-			if err := cloned.SanityCheck(ctx); err != nil {
+			if err := handler.SanityCheck(ctx); err != nil {
 				if !HasError(ctx) {
 					SetError(ctx, ErrBadRequest("Sanity check failed", err))
 				}
 				return
 			}
-			if err := cloned.ParseRequest(ctx, gcx.RawBody); err != nil {
+			if err := handler.ParseRequest(ctx, gcx.RawBody); err != nil {
 				if !HasError(ctx) {
 					SetError(ctx, ErrBadRequest("Parse request failed", err))
 				}
 				return
 			}
-			if err := cloned.Serve(ctx); err != nil {
+			if err := handler.Serve(ctx); err != nil {
 				if !HasError(ctx) {
 					SetError(ctx, ErrInternal("Controller serve failed", err))
 				}
 				return
 			}
-			if err := cloned.Finalize(ctx); err != nil {
+			if err := handler.Finalize(ctx); err != nil {
 				if !HasError(ctx) {
 					SetError(ctx, ErrInternal("Controller finalize failed", err))
 				}
@@ -112,12 +121,12 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 			}
 		})
 
-		var handler http.Handler = controllerHandler
+		var h http.Handler = controllerHandler
 		if len(groupMiddlewares) > 0 {
-			handler = groupMiddlewares.Apply(handler)
+			h = groupMiddlewares.Apply(h)
 		}
-		handler = r.middlewares.Apply(handler)
-		handler.ServeHTTP(w, req)
+		h = r.middlewares.Apply(h)
+		h.ServeHTTP(w, req)
 	})
 }
 

@@ -180,27 +180,6 @@ func (d *deferredResponseWriter) Reset() {
 	d.isHeaderWritten = false
 }
 
-func (d *deferredResponseWriter) Buffer() []byte {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	return d.buffer.Bytes()
-}
-
-func (d *deferredResponseWriter) StatusCode() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	return d.statusCode
-}
-
-func (d *deferredResponseWriter) IsCommitted() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	return d.isCommitted
-}
-
 func (d *deferredResponseWriter) Flush() {
 	d.mu.Lock()
 	defer d.mu.Unlock()

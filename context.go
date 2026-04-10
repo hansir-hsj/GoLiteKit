@@ -81,12 +81,12 @@ func WithContext(ctx context.Context) context.Context {
 }
 
 // newContext creates a new request context (internal use).
-func newContext(w http.ResponseWriter, r *http.Request, s *Services) context.Context {
+func newContext(r *http.Request) context.Context {
 	return WithContext(r.Context())
 }
 
-// _WithServices injects services into context (internal use).
-func _WithServices(s *Services) ContextOption {
+// withServices injects services and their loggers into context (internal use).
+func withServices(s *Services) ContextOption {
 	return func(gcx *Context) {
 		gcx.services = s
 		if s != nil {
@@ -186,12 +186,6 @@ func withLogger(logger logger.Logger) ContextOption {
 func withPanicLogger(pl *logger.PanicLogger) ContextOption {
 	return func(gcx *Context) {
 		gcx.panicLogger = pl
-	}
-}
-
-func WithServices(s *Services) ContextOption {
-	return func(gcx *Context) {
-		gcx.services = s
 	}
 }
 
@@ -364,10 +358,6 @@ func (ctx *Context) SSEWriter() *SSEWriter {
 		ctx.sseWriter = NewSSEWriter(ctx.responseWriter)
 	}
 	return ctx.sseWriter
-}
-
-func (ctx *Context) ServeSSE() *SSEWriter {
-	return ctx.SSEWriter()
 }
 
 // Query returns query parameter value.
