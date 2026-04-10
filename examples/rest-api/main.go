@@ -24,7 +24,7 @@ type User struct {
 // ---- list users ------------------------------------------------------------
 
 type ListUsersController struct {
-	glk.RestController[glk.NoBody]
+	glk.RestController
 }
 
 func (c *ListUsersController) Serve(ctx context.Context) error {
@@ -39,7 +39,7 @@ func (c *ListUsersController) Serve(ctx context.Context) error {
 // ---- get user by ID --------------------------------------------------------
 
 type GetUserController struct {
-	glk.RestController[glk.NoBody]
+	glk.RestController
 }
 
 func (c *GetUserController) Serve(ctx context.Context) error {
@@ -60,7 +60,7 @@ type CreateUserReq struct {
 }
 
 type CreateUserController struct {
-	glk.RestController[CreateUserReq]
+	glk.RestControllerOf[CreateUserReq]
 }
 
 func (c *CreateUserController) Serve(ctx context.Context) error {

@@ -9,7 +9,7 @@ import (
 )
 
 type HelloController struct {
-	glk.BaseController[glk.NoBody]
+	glk.BaseController
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {

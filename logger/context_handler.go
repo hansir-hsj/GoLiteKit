@@ -8,11 +8,13 @@ import (
 	"sync"
 )
 
-type loggerCtxKey string
+// LoggerCtxKey is the context key type for the logger context.
+type LoggerCtxKey struct{}
 
-const (
-	loggerKey loggerCtxKey = "logger_ctx_key"
-)
+// LoggerKey is the context key used to look up *LoggerContext.
+// Exported so that host packages can answer Value() queries directly
+// without going through context.WithValue chains.
+var LoggerKey = LoggerCtxKey{}
 
 type Field struct {
 	Level slog.Level
@@ -30,6 +32,13 @@ type LoggerContext struct {
 	Head *Field
 }
 
+// Reset clears all accumulated log fields so the instance can be reused.
+func (lc *LoggerContext) Reset() {
+	lc.mu.Lock()
+	lc.Head = nil
+	lc.mu.Unlock()
+}
+
 type ContextHandler struct {
 	slog.Handler
 }
@@ -39,13 +48,13 @@ func WithLoggerContext(ctx context.Context) context.Context {
 	loggerCtx := GetLoggerContext(ctx)
 	if loggerCtx == nil {
 		loggerCtx = &LoggerContext{}
-		return context.WithValue(ctx, loggerKey, loggerCtx)
+		return context.WithValue(ctx, LoggerKey, loggerCtx)
 	}
 	return ctx
 }
 
 func GetLoggerContext(ctx context.Context) *LoggerContext {
-	loggerCtx := ctx.Value(loggerKey)
+	loggerCtx := ctx.Value(LoggerKey)
 	if lcx, ok := loggerCtx.(*LoggerContext); ok {
 		return lcx
 	}
@@ -55,7 +64,7 @@ func GetLoggerContext(ctx context.Context) *LoggerContext {
 // Handle adds contextual attributes to the Record before calling the underlying
 // handler.
 func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
-	if logCtx, ok := ctx.Value(loggerKey).(*LoggerContext); ok {
+	if logCtx, ok := ctx.Value(LoggerKey).(*LoggerContext); ok {
 		logCtx.mu.RLock()
 		for node := logCtx.Head; node != nil; node = node.Next {
 			// skip lower level field
@@ -139,7 +148,7 @@ func AddFatal(ctx context.Context, key string, value any) {
 }
 
 func addLog(ctx context.Context, level slog.Level, key string, value any) {
-	lcx := ctx.Value(loggerKey)
+	lcx := ctx.Value(LoggerKey)
 	logCtx, ok := lcx.(*LoggerContext)
 	if !ok {
 		// Fail silently: ctx was not initialized with WithLoggerContext.

@@ -17,8 +17,10 @@ func TestWithContext(t *testing.T) {
 		if gcx == nil {
 			t.Fatal("expected Context to be created")
 		}
-		if gcx.data == nil {
-			t.Error("expected data map to be initialized")
+		// data map is lazily initialized on first write; just verify SetContextData works.
+		SetContextData(newCtx, "k", 1)
+		if _, ok := GetContextData(newCtx, "k"); !ok {
+			t.Error("expected data to be retrievable after SetContextData")
 		}
 	})
 

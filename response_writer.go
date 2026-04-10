@@ -174,9 +174,28 @@ func (d *deferredResponseWriter) Reset() {
 	}
 
 	d.buffer.Reset()
-	d.header = make(http.Header)
+	// Clear the header map in-place rather than allocating a new one.
+	for k := range d.header {
+		delete(d.header, k)
+	}
 	d.statusCode = http.StatusOK
 	d.isCommitted = false
+	d.isHeaderWritten = false
+}
+
+// resetForPool prepares the writer to be returned to the pool.
+// It performs a full state reset and clears the ResponseWriter reference.
+func (d *deferredResponseWriter) resetForPool() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.ResponseWriter = nil
+	d.buffer.Reset()
+	for k := range d.header {
+		delete(d.header, k)
+	}
+	d.statusCode = http.StatusOK
+	d.isCommitted = false
+	d.isFlushed = false
 	d.isHeaderWritten = false
 }
 
@@ -226,11 +245,21 @@ type responseCapture struct {
 	mu         sync.Mutex
 }
 
+var responseCapturePool = sync.Pool{New: func() any { return &responseCapture{} }}
+
 func newResponseCapture(w http.ResponseWriter) *responseCapture {
-	return &responseCapture{
-		ResponseWriter: w,
-		statusCode:     http.StatusOK,
-	}
+	rc := responseCapturePool.Get().(*responseCapture)
+	rc.ResponseWriter = w
+	rc.statusCode = http.StatusOK
+	return rc
+}
+
+// resetForPool clears all state and releases the ResponseWriter reference
+// so the struct can be safely returned to the pool.
+func (r *responseCapture) resetForPool() {
+	r.ResponseWriter = nil
+	r.body = r.body[:0]
+	r.statusCode = 0
 }
 
 func (r *responseCapture) Write(b []byte) (int, error) {

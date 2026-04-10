@@ -3,6 +3,7 @@ package golitekit
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 )
 
 type errorHandlerConfig struct {
@@ -34,6 +35,16 @@ func WithPanicCallback(f func(r *http.Request, recovered any)) ErrorHandlerOptio
 	}
 }
 
+// deferredWriterPool reuses deferredResponseWriter allocations across requests.
+var deferredWriterPool = sync.Pool{
+	New: func() any {
+		return &deferredResponseWriter{
+			header:     make(http.Header),
+			statusCode: http.StatusOK,
+		}
+	},
+}
+
 // ErrorHandlerMiddleware handles errors. Place at outermost middleware layer.
 func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 	cfg := &errorHandlerConfig{
@@ -45,7 +56,14 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			dw := newDeferredResponseWriter(w)
+			dw := deferredWriterPool.Get().(*deferredResponseWriter)
+			dw.ResponseWriter = w
+
+			// Return to pool after the request completes (runs last due to LIFO).
+			defer func() {
+				dw.resetForPool()
+				deferredWriterPool.Put(dw)
+			}()
 
 			defer func() {
 				if p := recover(); p != nil {

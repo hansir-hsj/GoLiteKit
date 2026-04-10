@@ -4,8 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
-
-	"github.com/hansir-hsj/GoLiteKit/logger"
+	"sync"
 )
 
 // Router handles route registration and middleware.
@@ -70,63 +69,80 @@ func (r *Router) handle(method, path string, c Controller, groupMiddlewares Midd
 
 func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) http.Handler {
 	// Extract the concrete type once at registration time.
-	// Per request, reflect.New allocates a fresh zero-value instance — no deep copy needed.
 	t := reflect.TypeOf(c).Elem()
+	ctrlPool := &sync.Pool{
+		New: func() any { return reflect.New(t).Interface() },
+	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ctx := newContext(req)
-		ctx = logger.WithLoggerContext(ctx)
-		req = req.WithContext(ctx)
-
+	// innerHandler is stable: built once at registration, not recreated per request.
+	// It reads gcx from the request context so it captures no per-request state.
+	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		ctx := req.Context()
 		gcx := GetContext(ctx)
+		handler := ctrlPool.Get().(Controller)
+		defer func() {
+			// Zero all fields and return to the pool to avoid GC churn.
+			reflect.ValueOf(handler).Elem().Set(reflect.Zero(t))
+			ctrlPool.Put(handler)
+		}()
+
+		if err := handler.Init(ctx); err != nil {
+			if !HasError(ctx) {
+				SetError(ctx, ErrInternal("Controller init failed", err))
+			}
+			return
+		}
+		if err := handler.SanityCheck(ctx); err != nil {
+			if !HasError(ctx) {
+				SetError(ctx, ErrBadRequest("Sanity check failed", err))
+			}
+			return
+		}
+		if err := handler.ParseRequest(ctx, gcx.RawBody); err != nil {
+			if !HasError(ctx) {
+				SetError(ctx, ErrBadRequest("Parse request failed", err))
+			}
+			return
+		}
+		if err := handler.Serve(ctx); err != nil {
+			if !HasError(ctx) {
+				SetError(ctx, ErrInternal("Controller serve failed", err))
+			}
+			return
+		}
+		if err := handler.Finalize(ctx); err != nil {
+			if !HasError(ctx) {
+				SetError(ctx, ErrInternal("Controller finalize failed", err))
+			}
+			return
+		}
+	})
+
+	// Pre-apply the full middleware chain at registration time (not per-request).
+	// This eliminates N closure allocations per request (one per middleware layer).
+	// Requirement: all router.Use() and group.Use() calls must precede route registration.
+	var prebuilt http.Handler = innerHandler
+	if len(groupMiddlewares) > 0 {
+		prebuilt = groupMiddlewares.Apply(prebuilt)
+	}
+	prebuilt = r.middlewares.Apply(prebuilt)
+
+	// Per-request handler: lightweight context injection only.
+	// glkContext is pooled and embeds both Context and LoggerContext by value,
+	// eliminating two context.WithValue allocations per request.
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		glkCtx := newContext(req)
+		req = req.WithContext(glkCtx)
+
+		gcx := &glkCtx.gcx
 		gcx.SetContextOptions(
 			WithRequest(req),
 			WithResponseWriter(w),
 			withServices(r.services),
 		)
 
-		controllerHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ctx := req.Context()
-			handler := reflect.New(t).Interface().(Controller)
-
-			if err := handler.Init(ctx); err != nil {
-				if !HasError(ctx) {
-					SetError(ctx, ErrInternal("Controller init failed", err))
-				}
-				return
-			}
-			if err := handler.SanityCheck(ctx); err != nil {
-				if !HasError(ctx) {
-					SetError(ctx, ErrBadRequest("Sanity check failed", err))
-				}
-				return
-			}
-			if err := handler.ParseRequest(ctx, gcx.RawBody); err != nil {
-				if !HasError(ctx) {
-					SetError(ctx, ErrBadRequest("Parse request failed", err))
-				}
-				return
-			}
-			if err := handler.Serve(ctx); err != nil {
-				if !HasError(ctx) {
-					SetError(ctx, ErrInternal("Controller serve failed", err))
-				}
-				return
-			}
-			if err := handler.Finalize(ctx); err != nil {
-				if !HasError(ctx) {
-					SetError(ctx, ErrInternal("Controller finalize failed", err))
-				}
-				return
-			}
-		})
-
-		var h http.Handler = controllerHandler
-		if len(groupMiddlewares) > 0 {
-			h = groupMiddlewares.Apply(h)
-		}
-		h = r.middlewares.Apply(h)
-		h.ServeHTTP(w, req)
+		prebuilt.ServeHTTP(w, req)
+		glkCtx.release()
 	})
 }
 

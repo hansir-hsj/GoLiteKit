@@ -2,7 +2,17 @@
 
 [English](readme.md) | [中文](readme.zh.md)
 
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
+[![Version](https://img.shields.io/badge/version-v0.2.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
+
 A lightweight Go web framework built on `net/http`, designed for simplicity and clarity.
+
+## Performance
+
+GoLiteKit benchmarks within **4% of Gin** on JSON-binding workloads.
+Pure routing overhead is ~20% higher due to pooled context, response buffering, and structured logging —
+features that plain routers omit. Full results: [`benchmarks/`](benchmarks/)
 
 ## Features
 
@@ -35,7 +45,7 @@ import (
 )
 
 type HelloController struct {
-    glk.BaseController[glk.NoBody]
+    glk.BaseController
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {
@@ -67,7 +77,7 @@ type CreateUserReq struct {
 }
 
 type CreateUserController struct {
-    glk.BaseController[CreateUserReq]
+	glk.BaseControllerOf[CreateUserReq]
 }
 
 func (c *CreateUserController) Serve(ctx context.Context) error {
@@ -79,7 +89,7 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 
 ## REST Controller
 
-`RestController[T]` wraps every response in a standard JSON envelope:
+`RestControllerOf[T]` wraps every response in a standard JSON envelope:
 
 ```json
 {"status": 0, "msg": "OK", "data": ..., "logid": "..."}
@@ -87,7 +97,7 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 
 ```go
 type ListUsersController struct {
-    glk.RestController[glk.NoBody]
+    glk.RestController
 }
 
 func (c *ListUsersController) Serve(ctx context.Context) error {
@@ -103,7 +113,7 @@ func (c *ListUsersController) Serve(ctx context.Context) error {
 // Register: app.GET("/users/{id}", &GetUserController{})
 
 type GetUserController struct {
-    glk.BaseController[glk.NoBody]
+    glk.BaseController
 }
 
 func (c *GetUserController) Serve(ctx context.Context) error {
@@ -151,7 +161,7 @@ app.Use(limiter.RateLimiterAsMiddleware(glk.ByIP))
 
 ```go
 type StreamController struct {
-    glk.BaseController[glk.NoBody]
+    glk.BaseController
 }
 
 func (c *StreamController) Serve(ctx context.Context) error {

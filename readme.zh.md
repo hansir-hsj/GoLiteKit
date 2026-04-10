@@ -2,7 +2,17 @@
 
 [English](readme.md) | [中文](readme.zh.md)
 
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
+[![Version](https://img.shields.io/badge/version-v0.2.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
+
 轻量级 Go Web 框架，基于 `net/http`，专注简洁和清晰。
+
+## 性能
+
+JSON 绑定场景下，GoLiteKit 与 Gin 的性能差距在 **4% 以内**。
+纯路由开销约高 20%，代价来自 pooled context、响应缓冲和结构化日志——
+这些是普通路由库所不具备的能力。完整数据：[`benchmarks/`](benchmarks/)
 
 ## 特性
 
@@ -35,7 +45,7 @@ import (
 )
 
 type HelloController struct {
-    glk.BaseController[glk.NoBody]
+    glk.BaseController
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {
@@ -66,7 +76,7 @@ type CreateUserReq struct {
 }
 
 type CreateUserController struct {
-    glk.BaseController[CreateUserReq]
+	glk.BaseControllerOf[CreateUserReq]
 }
 
 func (c *CreateUserController) Serve(ctx context.Context) error {
@@ -78,7 +88,7 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 
 ## REST 控制器
 
-`RestController[T]` 将每个响应封装为统一的 JSON 格式：
+`RestControllerOf[T]` 将每个响应封装为统一的 JSON 格式：
 
 ```json
 {"status": 0, "msg": "OK", "data": ..., "logid": "..."}
@@ -86,7 +96,7 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 
 ```go
 type ListUsersController struct {
-    glk.RestController[glk.NoBody]
+    glk.RestController
 }
 
 func (c *ListUsersController) Serve(ctx context.Context) error {
@@ -102,7 +112,7 @@ func (c *ListUsersController) Serve(ctx context.Context) error {
 // 注册: app.GET("/users/{id}", &GetUserController{})
 
 type GetUserController struct {
-    glk.BaseController[glk.NoBody]
+    glk.BaseController
 }
 
 func (c *GetUserController) Serve(ctx context.Context) error {
@@ -150,7 +160,7 @@ app.Use(limiter.RateLimiterAsMiddleware(glk.ByIP))
 
 ```go
 type StreamController struct {
-    glk.BaseController[glk.NoBody]
+    glk.BaseController
 }
 
 func (c *StreamController) Serve(ctx context.Context) error {

@@ -43,7 +43,7 @@ func makeRequest(method, path string, body []byte, contentType string) (*http.Re
 
 func TestBaseController_Init_NoContext(t *testing.T) {
 	// Init must fail when the request context has no golitekit Context.
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	err := c.Init(context.Background())
 	if err == nil {
 		t.Fatal("expected error when context is not initialised")
@@ -53,7 +53,7 @@ func TestBaseController_Init_NoContext(t *testing.T) {
 func TestBaseController_Init_WithContext(t *testing.T) {
 	req, rec, ctx := makeRequest(http.MethodGet, "/", nil, "")
 	_ = ctx
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init failed: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestBaseController_ParseRequest_JSON(t *testing.T) {
 	req, rec, _ := makeRequest(http.MethodPost, "/", body, "application/json")
 	_ = rec
 
-	c := &BaseController[jsonRequest]{}
+	c := &BaseControllerOf[jsonRequest]{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestBaseController_ParseRequest_NoBody(t *testing.T) {
 	// NoBody controllers skip parsing regardless of body content.
 	req, _, _ := makeRequest(http.MethodPost, "/", []byte(`{"x":1}`), "application/json")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestBaseController_ParseRequest_EmptyBody(t *testing.T) {
 	// Empty body should not cause an error.
 	req, _, _ := makeRequest(http.MethodPost, "/", nil, "application/json")
 
-	c := &BaseController[jsonRequest]{}
+	c := &BaseControllerOf[jsonRequest]{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
 	req = req.WithContext(ctx)
 
-	c := &BaseController[formRequest]{}
+	c := &BaseControllerOf[formRequest]{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestSetFieldValue_PointerToString(t *testing.T) {
 	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
 	req = req.WithContext(ctx)
 
-	c := &BaseController[Req]{}
+	c := &BaseControllerOf[Req]{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestSetFieldValue_PointerToString(t *testing.T) {
 func TestBaseController_QueryInt(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/?count=5", nil, "")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestBaseController_QueryInt(t *testing.T) {
 func TestBaseController_QueryString(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/?name=eve", nil, "")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -235,7 +235,7 @@ func TestBaseController_QueryString(t *testing.T) {
 func TestBaseController_QueryBool(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/?flag=1&flag2=true&flag3=false", nil, "")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestBaseController_QueryBool(t *testing.T) {
 func TestBaseController_QueryFloat64(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/?pi=3.14", nil, "")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestBaseController_QueryFloat64(t *testing.T) {
 func TestBaseController_BadRequest(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/", nil, "")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestBaseController_BadRequest(t *testing.T) {
 func TestBaseController_HasError(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/", nil, "")
 
-	c := &BaseController[NoBody]{}
+	c := &BaseController{}
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestBaseController_HasError(t *testing.T) {
 // ============================================================================
 
 type serveController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *serveController) Serve(ctx context.Context) error {

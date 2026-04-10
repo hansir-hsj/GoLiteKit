@@ -47,6 +47,23 @@ func GetTracker(ctx context.Context) *Tracker {
 }
 
 func WithTracker(ctx context.Context) context.Context {
+	// Fast path: ctx is a pooled *glkContext — initialize the embedded Tracker
+	// directly without any context.WithValue allocation.
+	if gctx, ok := ctx.(*glkContext); ok {
+		tr := &gctx.tracker
+		if !tr.started {
+			tr.name = "self"
+			tr.started = true
+			tr.startTime = time.Now()
+			tr.logID = generateLogID()
+			if tr.services == nil {
+				tr.services = make(map[string]*serviceTracker)
+			}
+		}
+		return ctx
+	}
+
+	// Slow path: fallback for non-pooled contexts (e.g., tests without the router).
 	tracker := GetTracker(ctx)
 	if tracker == nil {
 		tracker = &Tracker{
@@ -174,4 +191,19 @@ func (t *Tracker) LogTracker(ctx context.Context) {
 
 	logger.AddInfo(ctx, "all_t", totalCost.Milliseconds())
 	logger.AddInfo(ctx, "self_t", selfCost.Milliseconds())
+}
+
+// resetForPool clears all request-scoped state so the embedded Tracker inside
+// a pooled glkContext can be reused for the next request.
+// Must only be called from glkContext.release() when no goroutine holds t.mu.
+func (t *Tracker) resetForPool() {
+	t.name = ""
+	t.started = false
+	t.startTime = time.Time{}
+	t.totalCost = 0
+	t.stack = t.stack[:0]
+	for k := range t.services {
+		delete(t.services, k)
+	}
+	t.logID = ""
 }

@@ -7,7 +7,7 @@ import (
 
 // ControllerWrapper wraps http.HandlerFunc to conform to Controller interface.
 type ControllerWrapper struct {
-	BaseController[NoBody]
+	BaseController
 	handler http.HandlerFunc
 }
 
