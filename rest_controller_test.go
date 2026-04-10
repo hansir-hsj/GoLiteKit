@@ -29,7 +29,7 @@ func buildRestCtx(t *testing.T) (context.Context, *httptest.ResponseRecorder) {
 
 func TestRestController_ServeData(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
-	c := &RestController[NoBody]{}
+	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
 	c.ServeData(ctx, map[string]int{"count": 7})
@@ -53,7 +53,7 @@ func TestRestController_ServeData(t *testing.T) {
 
 func TestRestController_ServeOK(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
-	c := &RestController[NoBody]{}
+	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
 	c.ServeOK(ctx)
@@ -80,7 +80,7 @@ func TestRestController_ServeOK(t *testing.T) {
 
 func TestRestController_ServeMsgData(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
-	c := &RestController[NoBody]{}
+	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
 	c.ServeMsgData(ctx, "custom message", "payload")
@@ -104,7 +104,7 @@ func TestRestController_ServeMsgData(t *testing.T) {
 
 func TestRestController_ServeError(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
-	c := &RestController[NoBody]{}
+	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
 	c.ServeError(ctx, -10, "something went wrong")
@@ -127,7 +127,7 @@ func TestRestController_ServeError(t *testing.T) {
 
 func TestRestController_ServeErrorMsg(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
-	c := &RestController[NoBody]{}
+	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
 	c.ServeErrorMsg(ctx, "bad request from client")
@@ -157,7 +157,7 @@ func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
 
-	c := &RestController[NoBody]{}
+	c := &RestController{}
 	c.gcx = gcx
 
 	c.ServeData(ctx, nil)

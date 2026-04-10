@@ -12,14 +12,14 @@ import (
 // testController is a minimal no-op Controller for router tests that only need
 // to verify routing mechanics (not response content).
 type testController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *testController) Serve(ctx context.Context) error { return nil }
 
 // okJsonController serves {"ok":true} as JSON.
 type okJsonController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *okJsonController) Serve(ctx context.Context) error {
@@ -29,7 +29,7 @@ func (c *okJsonController) Serve(ctx context.Context) error {
 
 // createdJsonController serves {"created":true} as JSON.
 type createdJsonController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *createdJsonController) Serve(ctx context.Context) error {
@@ -39,7 +39,7 @@ func (c *createdJsonController) Serve(ctx context.Context) error {
 
 // emptyArrayController serves [] as JSON.
 type emptyArrayController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *emptyArrayController) Serve(ctx context.Context) error {
@@ -115,7 +115,7 @@ func TestRouter_NotFound(t *testing.T) {
 
 // errorController forces an error in Init by injecting a nil context key.
 type badInitController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *badInitController) Init(ctx context.Context) error {
@@ -145,7 +145,7 @@ func TestRouter_InitFailureSets500(t *testing.T) {
 
 // serveErrorController always returns an internal error from Serve.
 type serveErrorController struct {
-	BaseController[NoBody]
+	BaseController
 }
 
 func (c *serveErrorController) Serve(ctx context.Context) error {

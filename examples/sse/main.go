@@ -18,7 +18,7 @@ import (
 
 // CounterController streams a counter event every second for 5 seconds.
 type CounterController struct {
-	glk.BaseController[glk.NoBody]
+	glk.BaseController
 }
 
 func (c *CounterController) Serve(ctx context.Context) error {
@@ -38,7 +38,7 @@ func (c *CounterController) Serve(ctx context.Context) error {
 
 // ChatController streams a short simulated chat session using named events.
 type ChatController struct {
-	glk.BaseController[glk.NoBody]
+	glk.BaseController
 }
 
 func (c *ChatController) Serve(ctx context.Context) error {

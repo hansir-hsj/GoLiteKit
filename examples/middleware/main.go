@@ -49,7 +49,7 @@ func AdminMiddleware(next http.Handler) http.Handler {
 // ---- controllers -----------------------------------------------------------
 
 type PingController struct {
-	glk.BaseController[glk.NoBody]
+	glk.BaseController
 }
 
 func (c *PingController) Serve(ctx context.Context) error {
@@ -57,7 +57,7 @@ func (c *PingController) Serve(ctx context.Context) error {
 }
 
 type ProfileController struct {
-	glk.BaseController[glk.NoBody]
+	glk.BaseController
 }
 
 func (c *ProfileController) Serve(ctx context.Context) error {
@@ -65,7 +65,7 @@ func (c *ProfileController) Serve(ctx context.Context) error {
 }
 
 type AdminController struct {
-	glk.BaseController[glk.NoBody]
+	glk.BaseController
 }
 
 func (c *AdminController) Serve(ctx context.Context) error {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
 	"github.com/redis/go-redis/v9"
@@ -17,6 +18,81 @@ const (
 	globalContextKey ContextKey = iota
 	AppErrorKey                 = "__app_error__"
 )
+
+// reset clears all request-scoped fields so the instance can be reused from the pool.
+// If the data map already exists it is cleared in-place to avoid a new allocation.
+func (gcx *Context) reset() {
+	gcx.request = nil
+	gcx.RawBody = nil
+	gcx.responseWriter = nil
+	gcx.logger = nil
+	gcx.panicLogger = nil
+	gcx.services = nil
+	gcx.rawResponse = nil
+	gcx.jsonResponse = nil
+	gcx.rawHtml = ""
+	gcx.statusCode = 0
+	gcx.sseWriter = nil
+	// Reuse the existing map (clear entries) or leave nil for lazy init.
+	for k := range gcx.data {
+		delete(gcx.data, k)
+	}
+}
+
+// glkContext is a pooled context that embeds both the GoLiteKit Context and the
+// logger's LoggerContext by value.  Embedding them here avoids two
+// context.WithValue allocations (and the two valueCtx struct allocs) that would
+// otherwise occur on every request.
+type glkContext struct {
+	parent    context.Context
+	gcx       Context              // embedded by value — no separate allocation
+	loggerCtx logger.LoggerContext // embedded by value — no separate allocation
+	tracker   Tracker              // embedded by value — avoids context.WithValue for tracker
+}
+
+// glkCtxPool reuses *glkContext (and its embedded structs) across requests.
+var glkCtxPool = sync.Pool{New: func() any { return &glkContext{} }}
+
+func (c *glkContext) Deadline() (time.Time, bool) { return c.parent.Deadline() }
+func (c *glkContext) Done() <-chan struct{}       { return c.parent.Done() }
+func (c *glkContext) Err() error                  { return c.parent.Err() }
+
+// Value answers the two framework-owned keys directly (O(1), no chain walk).
+// All other keys are delegated to the parent context.
+func (c *glkContext) Value(key any) any {
+	switch key {
+	case globalContextKey:
+		return &c.gcx
+	case logger.LoggerKey:
+		return &c.loggerCtx
+	case trackerKey:
+		// Only expose the embedded tracker once it has been initialized by WithTracker.
+		if c.tracker.started {
+			return &c.tracker
+		}
+	}
+	return c.parent.Value(key)
+}
+
+// release resets all embedded contexts and returns c to the pool.
+func (c *glkContext) release() {
+	c.parent = nil
+	c.gcx.reset()
+	c.loggerCtx.Reset()
+	c.tracker.resetForPool()
+	glkCtxPool.Put(c)
+}
+
+// newContext retrieves a *glkContext from the pool, attaches the request's
+// parent context, and returns it ready for use.  The caller must call
+// glkCtx.release() after the request completes.
+func newContext(r *http.Request) *glkContext {
+	gctx := glkCtxPool.Get().(*glkContext)
+	gctx.parent = r.Context()
+	gctx.gcx.reset()
+	gctx.loggerCtx.Reset()
+	return gctx
+}
 
 type ContextKey int
 
@@ -72,17 +148,10 @@ func GetContext(ctx context.Context) *Context {
 func WithContext(ctx context.Context) context.Context {
 	gcx := GetContext(ctx)
 	if gcx == nil {
-		gcx = &Context{
-			data: make(map[string]any),
-		}
+		gcx = &Context{} // data map is lazily initialized on first SetContextData call
 		return context.WithValue(ctx, globalContextKey, gcx)
 	}
 	return ctx
-}
-
-// newContext creates a new request context (internal use).
-func newContext(r *http.Request) context.Context {
-	return WithContext(r.Context())
 }
 
 // withServices injects services and their loggers into context (internal use).
@@ -101,6 +170,9 @@ func SetContextData(ctx context.Context, key string, data any) {
 	if gcx != nil {
 		gcx.dataLock.Lock()
 		defer gcx.dataLock.Unlock()
+		if gcx.data == nil {
+			gcx.data = make(map[string]any)
+		}
 		gcx.data[key] = data
 	}
 }
@@ -110,8 +182,10 @@ func GetContextData(ctx context.Context, key string) (any, bool) {
 	if gcx != nil {
 		gcx.dataLock.RLock()
 		defer gcx.dataLock.RUnlock()
-		if v, ok := gcx.data[key]; ok {
-			return v, true
+		if gcx.data != nil {
+			if v, ok := gcx.data[key]; ok {
+				return v, true
+			}
 		}
 	}
 	return nil, false
@@ -128,6 +202,9 @@ func SetError(ctx context.Context, err *AppError) {
 func (gcx *Context) setError(err *AppError) {
 	gcx.dataLock.Lock()
 	defer gcx.dataLock.Unlock()
+	if gcx.data == nil {
+		gcx.data = make(map[string]any)
+	}
 	gcx.data[AppErrorKey] = err
 }
 
@@ -136,9 +213,11 @@ func GetError(ctx context.Context) *AppError {
 	if gcx != nil {
 		gcx.dataLock.RLock()
 		defer gcx.dataLock.RUnlock()
-		if v, ok := gcx.data[AppErrorKey]; ok {
-			if err, ok := v.(*AppError); ok {
-				return err
+		if gcx.data != nil {
+			if v, ok := gcx.data[AppErrorKey]; ok {
+				if err, ok := v.(*AppError); ok {
+					return err
+				}
 			}
 		}
 	}
@@ -154,7 +233,9 @@ func ClearError(ctx context.Context) {
 	if gcx != nil {
 		gcx.dataLock.Lock()
 		defer gcx.dataLock.Unlock()
-		delete(gcx.data, AppErrorKey)
+		if gcx.data != nil {
+			delete(gcx.data, AppErrorKey)
+		}
 	}
 }
 

@@ -42,23 +42,28 @@ type Controller interface {
 	Finalize(ctx context.Context) error
 }
 
-// BaseController is a generic controller base. T is the request struct or NoBody.
-type BaseController[T any] struct {
+// BaseControllerOf is a generic controller base. T is the request struct type.
+// Use BaseController directly when no request body is needed.
+type BaseControllerOf[T any] struct {
 	request *http.Request
 	logger  logger.Logger
 	gcx     *Context
 	Request T
 }
 
-func (c *BaseController[T]) MaxMemorySize() int64 {
+// BaseController is the no-body controller base (alias for BaseControllerOf[NoBody]).
+// Embed this when the endpoint does not parse a request body.
+type BaseController = BaseControllerOf[NoBody]
+
+func (c *BaseControllerOf[T]) MaxMemorySize() int64 {
 	return DefaultMaxMemorySize
 }
 
-func (c *BaseController[T]) MaxBodySize() int64 {
+func (c *BaseControllerOf[T]) MaxBodySize() int64 {
 	return DefaultMaxBodySize
 }
 
-func (c *BaseController[T]) Init(ctx context.Context) error {
+func (c *BaseControllerOf[T]) Init(ctx context.Context) error {
 	c.gcx = GetContext(ctx)
 	if c.gcx == nil {
 		return fmt.Errorf("golitekit: context not initialized; ensure WithContext is called before the controller")
@@ -73,25 +78,25 @@ func (c *BaseController[T]) Init(ctx context.Context) error {
 	return nil
 }
 
-func (c *BaseController[T]) DB() *gorm.DB {
+func (c *BaseControllerOf[T]) DB() *gorm.DB {
 	if c.gcx == nil {
 		return nil
 	}
 	return c.gcx.DB()
 }
 
-func (c *BaseController[T]) Redis() *redis.Client {
+func (c *BaseControllerOf[T]) Redis() *redis.Client {
 	if c.gcx == nil {
 		return nil
 	}
 	return c.gcx.Redis()
 }
 
-func (c *BaseController[T]) SanityCheck(ctx context.Context) error {
+func (c *BaseControllerOf[T]) SanityCheck(ctx context.Context) error {
 	return nil
 }
 
-func (c *BaseController[T]) ParseRequest(ctx context.Context, body []byte) error {
+func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context, body []byte) error {
 	var zeroValue T
 	if _, isNoBody := any(zeroValue).(NoBody); isNoBody {
 		return nil
@@ -114,7 +119,7 @@ func (c *BaseController[T]) ParseRequest(ctx context.Context, body []byte) error
 }
 
 // bindFormData binds form data to a struct.
-func (c *BaseController[T]) bindFormData(dst *T) error {
+func (c *BaseControllerOf[T]) bindFormData(dst *T) error {
 	dstValue := reflect.ValueOf(dst)
 	if dstValue.Kind() != reflect.Pointer {
 		return fmt.Errorf("dst must be a pointer")
@@ -164,7 +169,7 @@ func (c *BaseController[T]) bindFormData(dst *T) error {
 }
 
 // setFieldValue sets a struct field from string value.
-func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) error {
+func (c *BaseControllerOf[T]) setFieldValue(field reflect.Value, value string) error {
 	switch field.Kind() {
 	case reflect.String:
 		field.SetString(value)
@@ -214,48 +219,48 @@ func (c *BaseController[T]) setFieldValue(field reflect.Value, value string) err
 }
 
 // Error sets a custom AppError and returns it.
-func (c *BaseController[T]) Error(err *AppError) error {
+func (c *BaseControllerOf[T]) Error(err *AppError) error {
 	c.gcx.setError(err)
 	return err
 }
 
 // BadRequest sets a 400 error and returns it.
-func (c *BaseController[T]) BadRequest(msg string, internal error) error {
+func (c *BaseControllerOf[T]) BadRequest(msg string, internal error) error {
 	return c.Error(ErrBadRequest(msg, internal))
 }
 
 // Unauthorized sets a 401 error and returns it.
-func (c *BaseController[T]) Unauthorized(msg string) error {
+func (c *BaseControllerOf[T]) Unauthorized(msg string) error {
 	return c.Error(ErrUnauthorized(msg))
 }
 
 // Forbidden sets a 403 error and returns it.
-func (c *BaseController[T]) Forbidden(msg string) error {
+func (c *BaseControllerOf[T]) Forbidden(msg string) error {
 	return c.Error(ErrForbidden(msg))
 }
 
 // NotFound sets a 404 error and returns it.
-func (c *BaseController[T]) NotFound(msg string) error {
+func (c *BaseControllerOf[T]) NotFound(msg string) error {
 	return c.Error(ErrNotFound(msg))
 }
 
 // Conflict sets a 409 error and returns it.
-func (c *BaseController[T]) Conflict(msg string) error {
+func (c *BaseControllerOf[T]) Conflict(msg string) error {
 	return c.Error(ErrConflict(msg))
 }
 
 // TooManyRequests sets a 429 error and returns it.
-func (c *BaseController[T]) TooManyRequests(msg string) error {
+func (c *BaseControllerOf[T]) TooManyRequests(msg string) error {
 	return c.Error(ErrTooManyRequests(msg))
 }
 
 // InternalError sets a 500 error and returns it.
-func (c *BaseController[T]) InternalError(msg string, internal error) error {
+func (c *BaseControllerOf[T]) InternalError(msg string, internal error) error {
 	return c.Error(ErrInternal(msg, internal))
 }
 
 // HasError checks if there is an error in the current context.
-func (c *BaseController[T]) HasError() bool {
+func (c *BaseControllerOf[T]) HasError() bool {
 	if c.gcx == nil || c.request == nil {
 		return false
 	}
@@ -263,58 +268,58 @@ func (c *BaseController[T]) HasError() bool {
 }
 
 // Deprecated: Use c.Error(err) instead.
-func (c *BaseController[T]) SetError(ctx context.Context, err *AppError) {
+func (c *BaseControllerOf[T]) SetError(ctx context.Context, err *AppError) {
 	c.gcx.setError(err)
 }
 
 // Deprecated: Use c.BadRequest(msg, err) instead.
-func (c *BaseController[T]) SetBadRequest(ctx context.Context, msg string, internal error) {
+func (c *BaseControllerOf[T]) SetBadRequest(ctx context.Context, msg string, internal error) {
 	c.gcx.setError(ErrBadRequest(msg, internal))
 }
 
 // Deprecated: Use c.Unauthorized(msg) instead.
-func (c *BaseController[T]) SetUnauthorized(ctx context.Context, msg string) {
+func (c *BaseControllerOf[T]) SetUnauthorized(ctx context.Context, msg string) {
 	c.gcx.setError(ErrUnauthorized(msg))
 }
 
 // Deprecated: Use c.Forbidden(msg) instead.
-func (c *BaseController[T]) SetForbidden(ctx context.Context, msg string) {
+func (c *BaseControllerOf[T]) SetForbidden(ctx context.Context, msg string) {
 	c.gcx.setError(ErrForbidden(msg))
 }
 
 // Deprecated: Use c.NotFound(msg) instead.
-func (c *BaseController[T]) SetNotFound(ctx context.Context, msg string) {
+func (c *BaseControllerOf[T]) SetNotFound(ctx context.Context, msg string) {
 	c.gcx.setError(ErrNotFound(msg))
 }
 
 // Deprecated: Use c.Conflict(msg) instead.
-func (c *BaseController[T]) SetConflict(ctx context.Context, msg string) {
+func (c *BaseControllerOf[T]) SetConflict(ctx context.Context, msg string) {
 	c.gcx.setError(ErrConflict(msg))
 }
 
 // Deprecated: Use c.TooManyRequests(msg) instead.
-func (c *BaseController[T]) SetTooManyRequests(ctx context.Context, msg string) {
+func (c *BaseControllerOf[T]) SetTooManyRequests(ctx context.Context, msg string) {
 	c.gcx.setError(ErrTooManyRequests(msg))
 }
 
 // Deprecated: Use c.InternalError(msg, err) instead.
-func (c *BaseController[T]) SetInternalError(ctx context.Context, msg string, internal error) {
+func (c *BaseControllerOf[T]) SetInternalError(ctx context.Context, msg string, internal error) {
 	c.gcx.setError(ErrInternal(msg, internal))
 }
 
-func (c *BaseController[T]) Serve(ctx context.Context) error {
+func (c *BaseControllerOf[T]) Serve(ctx context.Context) error {
 	return nil
 }
 
-func (c *BaseController[T]) Finalize(ctx context.Context) error {
+func (c *BaseControllerOf[T]) Finalize(ctx context.Context) error {
 	return nil
 }
 
-func (c *BaseController[T]) GetRequest() T {
+func (c *BaseControllerOf[T]) GetRequest() T {
 	return c.Request
 }
 
-func (c *BaseController[T]) parseBody() error {
+func (c *BaseControllerOf[T]) parseBody() error {
 	maxMemorySize := c.MaxMemorySize()
 	if maxMemorySize <= 0 {
 		maxMemorySize = DefaultMaxMemorySize
@@ -352,11 +357,11 @@ func (c *BaseController[T]) parseBody() error {
 	return err
 }
 
-func (c *BaseController[T]) ServeRawData(data any) {
+func (c *BaseControllerOf[T]) ServeRawData(data any) {
 	c.gcx.ServeRawData(data)
 }
 
-func (c *BaseController[T]) ServeJSON(data any) error {
+func (c *BaseControllerOf[T]) ServeJSON(data any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -365,15 +370,15 @@ func (c *BaseController[T]) ServeJSON(data any) error {
 	return nil
 }
 
-func (c *BaseController[T]) ServeHTML(html string) {
+func (c *BaseControllerOf[T]) ServeHTML(html string) {
 	c.gcx.ServeHTML(html)
 }
 
-func (c *BaseController[T]) ServeSSE() *SSEWriter {
+func (c *BaseControllerOf[T]) ServeSSE() *SSEWriter {
 	return c.gcx.SSEWriter()
 }
 
-func (c *BaseController[T]) QueryInt(key string, def int) int {
+func (c *BaseControllerOf[T]) QueryInt(key string, def int) int {
 	params := c.request.URL.Query()
 	if vals, ok := params[key]; ok {
 		if ival, err := strconv.Atoi(vals[0]); err == nil {
@@ -383,7 +388,7 @@ func (c *BaseController[T]) QueryInt(key string, def int) int {
 	return def
 }
 
-func (c *BaseController[T]) QueryInt64(key string, def int64) int64 {
+func (c *BaseControllerOf[T]) QueryInt64(key string, def int64) int64 {
 	params := c.request.URL.Query()
 	if vals, ok := params[key]; ok {
 		if ival, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
@@ -393,7 +398,7 @@ func (c *BaseController[T]) QueryInt64(key string, def int64) int64 {
 	return def
 }
 
-func (c *BaseController[T]) QueryFloat32(key string, def float32) float32 {
+func (c *BaseControllerOf[T]) QueryFloat32(key string, def float32) float32 {
 	params := c.request.URL.Query()
 	if vals, ok := params[key]; ok {
 		if fval, err := strconv.ParseFloat(vals[0], 32); err == nil {
@@ -403,7 +408,7 @@ func (c *BaseController[T]) QueryFloat32(key string, def float32) float32 {
 	return def
 }
 
-func (c *BaseController[T]) QueryFloat64(key string, def float64) float64 {
+func (c *BaseControllerOf[T]) QueryFloat64(key string, def float64) float64 {
 	params := c.request.URL.Query()
 	if vals, ok := params[key]; ok {
 		if fval, err := strconv.ParseFloat(vals[0], 64); err == nil {
@@ -413,7 +418,7 @@ func (c *BaseController[T]) QueryFloat64(key string, def float64) float64 {
 	return def
 }
 
-func (c *BaseController[T]) QueryString(key string, def string) string {
+func (c *BaseControllerOf[T]) QueryString(key string, def string) string {
 	params := c.request.URL.Query()
 	if vals, ok := params[key]; ok {
 		return vals[0]
@@ -421,7 +426,7 @@ func (c *BaseController[T]) QueryString(key string, def string) string {
 	return def
 }
 
-func (c *BaseController[T]) QueryBool(key string, def bool) bool {
+func (c *BaseControllerOf[T]) QueryBool(key string, def bool) bool {
 	params := c.request.URL.Query()
 	if vals, ok := params[key]; ok {
 		return vals[0] == "1" || strings.ToLower(vals[0]) == "true"
@@ -429,7 +434,7 @@ func (c *BaseController[T]) QueryBool(key string, def bool) bool {
 	return def
 }
 
-func (c *BaseController[T]) forms() (map[string][]string, error) {
+func (c *BaseControllerOf[T]) forms() (map[string][]string, error) {
 	ct := c.request.Header.Get("Content-Type")
 	ct, _, err := mime.ParseMediaType(ct)
 	if err != nil {
@@ -448,7 +453,7 @@ func (c *BaseController[T]) forms() (map[string][]string, error) {
 	return nil, nil
 }
 
-func (c *BaseController[T]) FormString(key string, def string) string {
+func (c *BaseControllerOf[T]) FormString(key string, def string) string {
 	params, err := c.forms()
 	if err != nil {
 		return def
@@ -459,7 +464,7 @@ func (c *BaseController[T]) FormString(key string, def string) string {
 	return def
 }
 
-func (c *BaseController[T]) FormInt(key string, def int) int {
+func (c *BaseControllerOf[T]) FormInt(key string, def int) int {
 	params, err := c.forms()
 	if err != nil {
 		return def
@@ -472,7 +477,7 @@ func (c *BaseController[T]) FormInt(key string, def int) int {
 	return def
 }
 
-func (c *BaseController[T]) FormInt64(key string, def int64) int64 {
+func (c *BaseControllerOf[T]) FormInt64(key string, def int64) int64 {
 	params, err := c.forms()
 	if err != nil {
 		return def
@@ -485,7 +490,7 @@ func (c *BaseController[T]) FormInt64(key string, def int64) int64 {
 	return def
 }
 
-func (c *BaseController[T]) FormFloat32(key string, def float32) float32 {
+func (c *BaseControllerOf[T]) FormFloat32(key string, def float32) float32 {
 	params, err := c.forms()
 	if err != nil {
 		return def
@@ -498,7 +503,7 @@ func (c *BaseController[T]) FormFloat32(key string, def float32) float32 {
 	return def
 }
 
-func (c *BaseController[T]) FormFloat64(key string, def float64) float64 {
+func (c *BaseControllerOf[T]) FormFloat64(key string, def float64) float64 {
 	params, err := c.forms()
 	if err != nil {
 		return def
@@ -511,7 +516,7 @@ func (c *BaseController[T]) FormFloat64(key string, def float64) float64 {
 	return def
 }
 
-func (c *BaseController[T]) FormBool(key string, def bool) bool {
+func (c *BaseControllerOf[T]) FormBool(key string, def bool) bool {
 	params, err := c.forms()
 	if err != nil {
 		return def
@@ -522,18 +527,18 @@ func (c *BaseController[T]) FormBool(key string, def bool) bool {
 	return def
 }
 
-func (c *BaseController[T]) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
+func (c *BaseControllerOf[T]) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
 	return c.request.FormFile(key)
 }
 
-func (c *BaseController[T]) PathValueString(key string, def string) string {
+func (c *BaseControllerOf[T]) PathValueString(key string, def string) string {
 	if val := c.request.PathValue(key); val != "" {
 		return val
 	}
 	return def
 }
 
-func (c *BaseController[T]) PathValueInt(key string, def int) int {
+func (c *BaseControllerOf[T]) PathValueInt(key string, def int) int {
 	if val := c.request.PathValue(key); val != "" {
 		if ival, err := strconv.Atoi(val); err == nil {
 			return ival
@@ -542,7 +547,7 @@ func (c *BaseController[T]) PathValueInt(key string, def int) int {
 	return def
 }
 
-func (c *BaseController[T]) PathValueInt64(key string, def int64) int64 {
+func (c *BaseControllerOf[T]) PathValueInt64(key string, def int64) int64 {
 	if val := c.request.PathValue(key); val != "" {
 		if ival, err := strconv.ParseInt(val, 10, 64); err == nil {
 			return ival
@@ -551,7 +556,7 @@ func (c *BaseController[T]) PathValueInt64(key string, def int64) int64 {
 	return def
 }
 
-func (c *BaseController[T]) PathValueFloat32(key string, def float32) float32 {
+func (c *BaseControllerOf[T]) PathValueFloat32(key string, def float32) float32 {
 	if val := c.request.PathValue(key); val != "" {
 		if fval, err := strconv.ParseFloat(val, 32); err == nil {
 			return float32(fval)
@@ -560,7 +565,7 @@ func (c *BaseController[T]) PathValueFloat32(key string, def float32) float32 {
 	return def
 }
 
-func (c *BaseController[T]) PathValueFloat64(key string, def float64) float64 {
+func (c *BaseControllerOf[T]) PathValueFloat64(key string, def float64) float64 {
 	if val := c.request.PathValue(key); val != "" {
 		if fval, err := strconv.ParseFloat(val, 64); err == nil {
 			return fval
@@ -569,72 +574,72 @@ func (c *BaseController[T]) PathValueFloat64(key string, def float64) float64 {
 	return def
 }
 
-func (c *BaseController[T]) PathValueBool(key string, def bool) bool {
+func (c *BaseControllerOf[T]) PathValueBool(key string, def bool) bool {
 	if val := c.request.PathValue(key); val != "" {
 		return val == "1" || strings.ToLower(val) == "true"
 	}
 	return def
 }
 
-func (c *BaseController[T]) AddDebug(ctx context.Context, key string, value any) {
+func (c *BaseControllerOf[T]) AddDebug(ctx context.Context, key string, value any) {
 	logger.AddDebug(ctx, key, value)
 }
 
-func (c *BaseController[T]) AddTrace(ctx context.Context, key string, value any) {
+func (c *BaseControllerOf[T]) AddTrace(ctx context.Context, key string, value any) {
 	logger.AddTrace(ctx, key, value)
 }
 
-func (c *BaseController[T]) AddInfo(ctx context.Context, key string, value any) {
+func (c *BaseControllerOf[T]) AddInfo(ctx context.Context, key string, value any) {
 	logger.AddInfo(ctx, key, value)
 }
 
-func (c *BaseController[T]) AddWarning(ctx context.Context, key string, value any) {
+func (c *BaseControllerOf[T]) AddWarning(ctx context.Context, key string, value any) {
 	logger.AddWarning(ctx, key, value)
 }
 
-func (c *BaseController[T]) AddFatal(ctx context.Context, key string, value any) {
+func (c *BaseControllerOf[T]) AddFatal(ctx context.Context, key string, value any) {
 	logger.AddFatal(ctx, key, value)
 }
 
-func (c *BaseController[T]) Debug(ctx context.Context, format string, args ...any) {
+func (c *BaseControllerOf[T]) Debug(ctx context.Context, format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Debug(ctx, format, args...)
 	}
 }
 
-func (c *BaseController[T]) Trace(ctx context.Context, format string, args ...any) {
+func (c *BaseControllerOf[T]) Trace(ctx context.Context, format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Trace(ctx, format, args...)
 	}
 }
 
-func (c *BaseController[T]) Info(ctx context.Context, format string, args ...any) {
+func (c *BaseControllerOf[T]) Info(ctx context.Context, format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Info(ctx, format, args...)
 	}
 }
 
-func (c *BaseController[T]) Warning(ctx context.Context, format string, args ...any) {
+func (c *BaseControllerOf[T]) Warning(ctx context.Context, format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Warning(ctx, format, args...)
 	}
 }
 
-func (c *BaseController[T]) Fatal(ctx context.Context, format string, args ...any) {
+func (c *BaseControllerOf[T]) Fatal(ctx context.Context, format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Fatal(ctx, format, args...)
 	}
 }
 
-func (c *BaseController[T]) SendSSE(event SSEvent) error {
+func (c *BaseControllerOf[T]) SendSSE(event SSEvent) error {
 	return c.gcx.SSEWriter().Send(event)
 }
 
-func (c *BaseController[T]) SendSSEData(data interface{}) error {
+func (c *BaseControllerOf[T]) SendSSEData(data interface{}) error {
 	return c.SendSSE(SSEvent{Data: data})
 }
 
-func (c *BaseController[T]) SendSSEEvent(eventType string, data interface{}) error {
+func (c *BaseControllerOf[T]) SendSSEEvent(eventType string, data interface{}) error {
 	return c.SendSSE(SSEvent{
 		Event: eventType,
 		Data:  data,

@@ -8,14 +8,32 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [v0.2.0] - 2026-04-10
+
 ### Changed
 - Controller dispatch: replaced `CloneController` deep-copy with `reflect.Type` + `reflect.New`.
   Each request gets a fresh zero-value instance; ~250 lines of copy machinery removed.
 - 405 Method Not Allowed response now returns JSON (`{"status":405,"msg":"..."}`) instead of plain text.
+- `BaseController[T]` renamed to `BaseControllerOf[T]`; `RestController[T]` renamed to `RestControllerOf[T]`.
+  `BaseController` and `RestController` are now no-body aliases — embedding them requires no type parameter.
+
+### Performance
+- Pool `glkContext` via `sync.Pool` with `LoggerContext` and `Tracker` embedded by value —
+  eliminates 4 `context.WithValue` allocations per request.
+- Pre-build middleware chain at route registration — eliminates per-request closure allocations.
+- Pool `responseCapture` in `LoggerAsMiddleware` — **-1 alloc/op**.
+- Embed `Tracker` in `glkContext` (no heap allocation on `WithTracker`) — **-2 allocs/op**.
+
+### Added
+- `benchmarks/` — comparative suite vs Gin / Echo / Chi / Stdlib across 5 scenarios.
+- `docs/` — performance optimization notes.
 
 ### Removed
 - `CloneController` and all associated deep-copy helpers.
 - Exported `WithServices` option (no callers; inconsistent with internal version).
+- `RestGetController` alias (superseded by `RestController`).
 
 ---
 

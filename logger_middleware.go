@@ -16,6 +16,10 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Ha
 			gcx := GetContext(ctx)
 
 			rw := newResponseCapture(w)
+			defer func() {
+				rw.resetForPool()
+				responseCapturePool.Put(rw)
+			}()
 			gcx.responseWriter = rw
 
 			gcx.SetContextOptions(withLogger(logInst), withPanicLogger(panicInst))
