@@ -6,6 +6,19 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+- Controller dispatch: replaced `CloneController` deep-copy with `reflect.Type` + `reflect.New`.
+  Each request gets a fresh zero-value instance; ~250 lines of copy machinery removed.
+- 405 Method Not Allowed response now returns JSON (`{"status":405,"msg":"..."}`) instead of plain text.
+
+### Removed
+- `CloneController` and all associated deep-copy helpers.
+- Exported `WithServices` option (no callers; inconsistent with internal version).
+
+---
+
 ## [v0.1.0] - 2026-04-09
 
 ### Added
@@ -19,7 +32,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Per-request `Context` with `Tracker` for structured logging and timing
 - Log rotation: time-based rules, configurable file count
 - DB (GORM/MySQL) and Redis integration via config files
-- `CloneController` deep-copy with sync-primitive safety
 
 **glk CLI**
 - `glk new <appName>` — scaffold a new GoLiteKit project

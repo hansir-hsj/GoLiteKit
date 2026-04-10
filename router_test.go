@@ -5,20 +5,45 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
-// testController is a minimal Controller for router tests.
-// ServeFn must be exported so CloneController can copy it via reflection.
+// testController is a minimal no-op Controller for router tests that only need
+// to verify routing mechanics (not response content).
 type testController struct {
 	BaseController[NoBody]
-	ServeFn func(ctx context.Context) error
 }
 
-func (c *testController) Serve(ctx context.Context) error {
-	if c.ServeFn != nil {
-		return c.ServeFn(ctx)
-	}
+func (c *testController) Serve(ctx context.Context) error { return nil }
+
+// okJsonController serves {"ok":true} as JSON.
+type okJsonController struct {
+	BaseController[NoBody]
+}
+
+func (c *okJsonController) Serve(ctx context.Context) error {
+	GetContext(ctx).ServeJSON([]byte(`{"ok":true}`))
+	return nil
+}
+
+// createdJsonController serves {"created":true} as JSON.
+type createdJsonController struct {
+	BaseController[NoBody]
+}
+
+func (c *createdJsonController) Serve(ctx context.Context) error {
+	GetContext(ctx).ServeJSON([]byte(`{"created":true}`))
+	return nil
+}
+
+// emptyArrayController serves [] as JSON.
+type emptyArrayController struct {
+	BaseController[NoBody]
+}
+
+func (c *emptyArrayController) Serve(ctx context.Context) error {
+	GetContext(ctx).ServeJSON([]byte(`[]`))
 	return nil
 }
 
@@ -33,12 +58,7 @@ func newTestRouter() *Router {
 
 func TestRouter_GET(t *testing.T) {
 	r := newTestRouter()
-	r.GET("/hello", &testController{
-		ServeFn: func(ctx context.Context) error {
-			GetContext(ctx).ServeJSON([]byte(`{"ok":true}`))
-			return nil
-		},
-	})
+	r.GET("/hello", &okJsonController{})
 
 	req := httptest.NewRequest(http.MethodGet, "/hello", nil)
 	rec := httptest.NewRecorder()
@@ -47,16 +67,14 @@ func TestRouter_GET(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
+	if !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Errorf("body = %s, want JSON containing \"ok\":true", rec.Body.String())
+	}
 }
 
 func TestRouter_POST(t *testing.T) {
 	r := newTestRouter()
-	r.POST("/submit", &testController{
-		ServeFn: func(ctx context.Context) error {
-			GetContext(ctx).ServeJSON([]byte(`{"created":true}`))
-			return nil
-		},
-	})
+	r.POST("/submit", &createdJsonController{})
 
 	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
 	rec := httptest.NewRecorder()
@@ -64,6 +82,9 @@ func TestRouter_POST(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `"created":true`) {
+		t.Errorf("body = %s, want JSON containing \"created\":true", rec.Body.String())
 	}
 }
 
@@ -122,14 +143,19 @@ func TestRouter_InitFailureSets500(t *testing.T) {
 	}
 }
 
+// serveErrorController always returns an internal error from Serve.
+type serveErrorController struct {
+	BaseController[NoBody]
+}
+
+func (c *serveErrorController) Serve(ctx context.Context) error {
+	return ErrInternal("serve failed", nil)
+}
+
 func TestRouter_ServeError_PropagatedViaMiddleware(t *testing.T) {
 	// A controller returning an error must result in a 500 JSON response.
 	r := newTestRouter()
-	r.GET("/err", &testController{
-		ServeFn: func(ctx context.Context) error {
-			return ErrInternal("serve failed", nil)
-		},
-	})
+	r.GET("/err", &serveErrorController{})
 
 	req := httptest.NewRequest(http.MethodGet, "/err", nil)
 	rec := httptest.NewRecorder()
@@ -167,12 +193,7 @@ func TestRouter_Any_RegistersAllMethods(t *testing.T) {
 func TestRouter_Group_RoutesWithPrefix(t *testing.T) {
 	r := newTestRouter()
 	g := r.Group("/api")
-	g.GET("/users", &testController{
-		ServeFn: func(ctx context.Context) error {
-			GetContext(ctx).ServeJSON([]byte(`[]`))
-			return nil
-		},
-	})
+	g.GET("/users", &emptyArrayController{})
 
 	// Correct prefixed path should hit the handler.
 	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
@@ -181,6 +202,9 @@ func TestRouter_Group_RoutesWithPrefix(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `[]`) {
+		t.Errorf("body = %s, want JSON containing []", rec.Body.String())
 	}
 }
 
