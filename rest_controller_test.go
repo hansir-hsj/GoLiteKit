@@ -8,11 +8,6 @@ import (
 	"testing"
 )
 
-// ============================================================================
-// Helpers shared by RestController tests
-// ============================================================================
-
-// buildRestCtx creates a minimal context + recorder ready for RestController methods.
 func buildRestCtx(t *testing.T) (context.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	rec := httptest.NewRecorder()
@@ -23,21 +18,26 @@ func buildRestCtx(t *testing.T) (context.Context, *httptest.ResponseRecorder) {
 	return ctx, rec
 }
 
-// ============================================================================
-// ServeData
-// ============================================================================
+// renderContext runs ContextAsMiddleware with a no-op inner handler against ctx.
+func renderContext(ctx context.Context, rec *httptest.ResponseRecorder) {
+	mw := ContextAsMiddleware()
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		return nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	mw(inner).ServeHTTP(rec, req.WithContext(ctx))
+}
 
 func TestRestController_ServeData(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
 	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
-	c.ServeData(ctx, map[string]int{"count": 7})
+	if err := c.ServeData(ctx, map[string]int{"count": 7}); err != nil {
+		t.Fatalf("ServeData: %v", err)
+	}
 
-	// ServeData sets jsonResponse; render it through ContextAsMiddleware.
-	mw := ContextAsMiddleware()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req.WithContext(ctx))
+	renderContext(ctx, rec)
 
 	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -56,11 +56,11 @@ func TestRestController_ServeOK(t *testing.T) {
 	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
-	c.ServeOK(ctx)
+	if err := c.ServeOK(ctx); err != nil {
+		t.Fatalf("ServeOK: %v", err)
+	}
 
-	mw := ContextAsMiddleware()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req.WithContext(ctx))
+	renderContext(ctx, rec)
 
 	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -74,20 +74,16 @@ func TestRestController_ServeOK(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// ServeMsgData
-// ============================================================================
-
 func TestRestController_ServeMsgData(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
 	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
-	c.ServeMsgData(ctx, "custom message", "payload")
+	if err := c.ServeMsgData(ctx, "custom message", "payload"); err != nil {
+		t.Fatalf("ServeMsgData: %v", err)
+	}
 
-	mw := ContextAsMiddleware()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req.WithContext(ctx))
+	renderContext(ctx, rec)
 
 	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -98,20 +94,16 @@ func TestRestController_ServeMsgData(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// ServeError / ServeErrorMsg
-// ============================================================================
-
 func TestRestController_ServeError(t *testing.T) {
 	ctx, rec := buildRestCtx(t)
 	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
-	c.ServeError(ctx, -10, "something went wrong")
+	if err := c.ServeError(ctx, -10, "something went wrong"); err != nil {
+		t.Fatalf("ServeError: %v", err)
+	}
 
-	mw := ContextAsMiddleware()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req.WithContext(ctx))
+	renderContext(ctx, rec)
 
 	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -130,11 +122,11 @@ func TestRestController_ServeErrorMsg(t *testing.T) {
 	c := &RestController{}
 	c.gcx = GetContext(ctx)
 
-	c.ServeErrorMsg(ctx, "bad request from client")
+	if err := c.ServeErrorMsg(ctx, "bad request from client"); err != nil {
+		t.Fatalf("ServeErrorMsg: %v", err)
+	}
 
-	mw := ContextAsMiddleware()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req.WithContext(ctx))
+	renderContext(ctx, rec)
 
 	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -144,10 +136,6 @@ func TestRestController_ServeErrorMsg(t *testing.T) {
 		t.Errorf("status = %d, want -1", resp.Status)
 	}
 }
-
-// ============================================================================
-// LogID is included when a Tracker is present
-// ============================================================================
 
 func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 	rec := httptest.NewRecorder()
@@ -160,10 +148,11 @@ func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 	c := &RestController{}
 	c.gcx = gcx
 
-	c.ServeData(ctx, nil)
+	if err := c.ServeData(ctx, nil); err != nil {
+		t.Fatalf("ServeData: %v", err)
+	}
 
-	mw := ContextAsMiddleware()
-	mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(rec, req.WithContext(ctx))
+	renderContext(ctx, rec)
 
 	var resp Response
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {

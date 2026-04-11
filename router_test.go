@@ -9,15 +9,12 @@ import (
 	"testing"
 )
 
-// testController is a minimal no-op Controller for router tests that only need
-// to verify routing mechanics (not response content).
 type testController struct {
 	BaseController
 }
 
 func (c *testController) Serve(ctx context.Context) error { return nil }
 
-// okJsonController serves {"ok":true} as JSON.
 type okJsonController struct {
 	BaseController
 }
@@ -27,7 +24,6 @@ func (c *okJsonController) Serve(ctx context.Context) error {
 	return nil
 }
 
-// createdJsonController serves {"created":true} as JSON.
 type createdJsonController struct {
 	BaseController
 }
@@ -37,7 +33,6 @@ func (c *createdJsonController) Serve(ctx context.Context) error {
 	return nil
 }
 
-// emptyArrayController serves [] as JSON.
 type emptyArrayController struct {
 	BaseController
 }
@@ -47,12 +42,11 @@ func (c *emptyArrayController) Serve(ctx context.Context) error {
 	return nil
 }
 
-// newTestRouter returns a Router wired with the minimal middleware stack needed
-// to exercise request dispatch (context + error handler).
+// newTestRouter returns a Router with the minimal middleware stack for tests.
 func newTestRouter() *Router {
 	r := NewRouter(nil)
-	r.Use(ContextAsMiddleware())
 	r.Use(ErrorHandlerMiddleware())
+	r.Use(ContextAsMiddleware())
 	return r
 }
 
@@ -89,7 +83,6 @@ func TestRouter_POST(t *testing.T) {
 }
 
 func TestRouter_MethodNotAllowed(t *testing.T) {
-	// Register only GET; a POST request must receive 405.
 	r := NewRouter(nil)
 	r.GET("/only-get", &testController{})
 
@@ -113,37 +106,31 @@ func TestRouter_NotFound(t *testing.T) {
 	}
 }
 
-// errorController forces an error in Init by injecting a nil context key.
 type badInitController struct {
 	BaseController
 }
 
 func (c *badInitController) Init(ctx context.Context) error {
-	// Calling the base Init on a context without golitekit context returns an error.
 	return c.BaseController.Init(ctx)
 }
 
 func (c *badInitController) Serve(ctx context.Context) error { return nil }
 
 func TestRouter_InitFailureSets500(t *testing.T) {
-	// wrapController must propagate Init errors as internal errors.
 	r := NewRouter(nil)
-	r.Use(ContextAsMiddleware())
 	r.Use(ErrorHandlerMiddleware())
+	r.Use(ContextAsMiddleware())
 	r.GET("/bad", &badInitController{})
 
 	req := httptest.NewRequest(http.MethodGet, "/bad", nil)
 	rec := httptest.NewRecorder()
 	r.Handler().ServeHTTP(rec, req)
 
-	// Init fails because WithContext is applied inside wrapController, so this
-	// actually succeeds. Verify the route at least returns 200 (no panic).
 	if rec.Code == 0 {
 		t.Error("expected a non-zero status code")
 	}
 }
 
-// serveErrorController always returns an internal error from Serve.
 type serveErrorController struct {
 	BaseController
 }
@@ -153,7 +140,6 @@ func (c *serveErrorController) Serve(ctx context.Context) error {
 }
 
 func TestRouter_ServeError_PropagatedViaMiddleware(t *testing.T) {
-	// A controller returning an error must result in a 500 JSON response.
 	r := newTestRouter()
 	r.GET("/err", &serveErrorController{})
 
@@ -183,7 +169,6 @@ func TestRouter_Any_RegistersAllMethods(t *testing.T) {
 		rec := httptest.NewRecorder()
 		r.Handler().ServeHTTP(rec, req)
 
-		// With no middleware the response defaults to 200 (handler executed without error).
 		if rec.Code == http.StatusMethodNotAllowed {
 			t.Errorf("method %s: got 405, want registered handler", method)
 		}
@@ -195,7 +180,6 @@ func TestRouter_Group_RoutesWithPrefix(t *testing.T) {
 	g := r.Group("/api")
 	g.GET("/users", &emptyArrayController{})
 
-	// Correct prefixed path should hit the handler.
 	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
 	rec := httptest.NewRecorder()
 	r.Handler().ServeHTTP(rec, req)
@@ -211,12 +195,12 @@ func TestRouter_Group_RoutesWithPrefix(t *testing.T) {
 func TestRouter_Use_MiddlewareExecutes(t *testing.T) {
 	executed := false
 	r := NewRouter(nil)
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	r.Use(Middleware(func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
 			executed = true
-			next.ServeHTTP(w, req)
-		})
-	})
+			return next(ctx, w, req)
+		}
+	}))
 	r.GET("/mw", &testController{})
 
 	req := httptest.NewRequest(http.MethodGet, "/mw", nil)

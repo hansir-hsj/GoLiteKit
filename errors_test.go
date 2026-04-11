@@ -147,3 +147,33 @@ func TestNewAppError(t *testing.T) {
 		t.Error("Internal error not set correctly")
 	}
 }
+
+func TestAppError_Unwrap(t *testing.T) {
+	internal := errors.New("root cause")
+	err := ErrInternal("wrapper", internal)
+
+	if err.Unwrap() != internal {
+		t.Error("Unwrap() should return internal error")
+	}
+
+	// Test errors.Is works through the chain
+	if !errors.Is(err, internal) {
+		t.Error("errors.Is should find internal error")
+	}
+}
+
+func TestOptionalInternalError(t *testing.T) {
+	// Without internal error
+	err1 := ErrUnauthorized("no internal")
+	if err1.Internal != nil {
+		t.Error("Internal should be nil when not provided")
+	}
+
+	// With internal error
+	internal := errors.New("cause")
+	err2 := ErrUnauthorized("with internal", internal)
+	if err2.Internal != internal {
+		t.Error("Internal should be set when provided")
+	}
+}
+

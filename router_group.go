@@ -10,7 +10,7 @@ type RouterGroup struct {
 }
 
 // Use adds middlewares to this group.
-func (g *RouterGroup) Use(middlewares ...HandlerMiddleware) *RouterGroup {
+func (g *RouterGroup) Use(middlewares ...Middleware) *RouterGroup {
 	g.middlewares.Use(middlewares...)
 	return g
 }

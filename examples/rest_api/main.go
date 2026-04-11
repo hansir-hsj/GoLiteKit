@@ -1,9 +1,10 @@
-// rest-api demonstrates RestController with JSON binding and path parameters.
+// rest_api demonstrates RestController with JSON binding and path parameters.
 //
 // Routes:
-//   GET  /api/users         list all users
-//   GET  /api/users/{id}    get a user by ID
-//   POST /api/users         create a user
+//
+//	GET  /api/users         list all users
+//	GET  /api/users/{id}    get a user by ID
+//	POST /api/users         create a user
 package main
 
 import (
@@ -32,8 +33,7 @@ func (c *ListUsersController) Serve(ctx context.Context) error {
 		{ID: 1, Name: "alice", Age: 30},
 		{ID: 2, Name: "bob", Age: 25},
 	}
-	c.ServeData(ctx, users)
-	return nil
+	return c.ServeData(ctx, users)
 }
 
 // ---- get user by ID --------------------------------------------------------
@@ -48,8 +48,7 @@ func (c *GetUserController) Serve(ctx context.Context) error {
 		return c.BadRequest("invalid id", nil)
 	}
 	user := User{ID: id, Name: "alice", Age: 30}
-	c.ServeData(ctx, user)
-	return nil
+	return c.ServeData(ctx, user)
 }
 
 // ---- create user -----------------------------------------------------------
@@ -69,8 +68,7 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 		return c.BadRequest("name is required", nil)
 	}
 	created := User{ID: 3, Name: req.Name, Age: req.Age}
-	c.ServeData(ctx, created)
-	return nil
+	return c.ServeData(ctx, created)
 }
 
 // ---- main ------------------------------------------------------------------

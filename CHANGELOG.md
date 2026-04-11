@@ -60,4 +60,4 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 **Documentation**
 - README (English and Chinese) with quick start and API guide
-- Examples: hello, rest-api, middleware, sse
+- Examples: hello, rest_api, middleware, sse

@@ -5,10 +5,10 @@ import (
 	"net/http"
 )
 
-// ControllerWrapper wraps http.HandlerFunc to conform to Controller interface.
+// ControllerWrapper wraps a Handler to conform to the Controller interface.
 type ControllerWrapper struct {
 	BaseController
-	handler http.HandlerFunc
+	handler Handler
 }
 
 func (c *ControllerWrapper) Init(ctx context.Context) error {
@@ -17,24 +17,26 @@ func (c *ControllerWrapper) Init(ctx context.Context) error {
 
 func (c *ControllerWrapper) Serve(ctx context.Context) error {
 	gcx := GetContext(ctx)
-	c.handler(gcx.responseWriter, gcx.request)
-	return nil
+	return c.handler(ctx, gcx.responseWriter, gcx.request)
 }
 
 func (c *ControllerWrapper) Finalize(ctx context.Context) error {
 	return c.BaseController.Finalize(ctx)
 }
 
-// WrapFunc wraps http.HandlerFunc into a Controller.
-func WrapFunc(f http.HandlerFunc) Controller {
-	return &ControllerWrapper{
-		handler: f,
-	}
+// WrapFunc wraps a Handler into a Controller. Errors are propagated normally.
+func WrapFunc(f Handler) Controller {
+	return &ControllerWrapper{handler: f}
 }
 
-// WrapHandler wraps http.Handler into a Controller.
+// WrapHandler wraps an http.Handler into a Controller.
+// Note: http.Handler has no error return, so errors cannot propagate.
+// Use WrapFunc with a Handler for full error propagation.
 func WrapHandler(handler http.Handler) Controller {
 	return &ControllerWrapper{
-		handler: handler.ServeHTTP,
+		handler: func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			handler.ServeHTTP(w, r)
+			return nil
+		},
 	}
 }

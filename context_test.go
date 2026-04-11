@@ -17,7 +17,6 @@ func TestWithContext(t *testing.T) {
 		if gcx == nil {
 			t.Fatal("expected Context to be created")
 		}
-		// data map is lazily initialized on first write; just verify SetContextData works.
 		SetContextData(newCtx, "k", 1)
 		if _, ok := GetContextData(newCtx, "k"); !ok {
 			t.Error("expected data to be retrievable after SetContextData")
@@ -56,92 +55,6 @@ func TestGetContext(t *testing.T) {
 	})
 }
 
-func TestSetError_GetError(t *testing.T) {
-	t.Run("sets and gets error", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		expectedErr := ErrBadRequest("test error", nil)
-
-		SetError(ctx, expectedErr)
-		gotErr := GetError(ctx)
-
-		if gotErr == nil {
-			t.Fatal("expected error to be returned")
-		}
-		if gotErr.Code != expectedErr.Code {
-			t.Errorf("Code = %d, want %d", gotErr.Code, expectedErr.Code)
-		}
-		if gotErr.Message != expectedErr.Message {
-			t.Errorf("Message = %s, want %s", gotErr.Message, expectedErr.Message)
-		}
-	})
-
-	t.Run("returns nil when no error set", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		if GetError(ctx) != nil {
-			t.Error("expected nil when no error is set")
-		}
-	})
-
-	t.Run("returns nil for plain context", func(t *testing.T) {
-		ctx := context.Background()
-		if GetError(ctx) != nil {
-			t.Error("expected nil for plain context")
-		}
-	})
-
-	t.Run("handles invalid type in error key gracefully", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		// Manually set a non-AppError value
-		SetContextData(ctx, AppErrorKey, "not an AppError")
-
-		// Should return nil instead of panic
-		err := GetError(ctx)
-		if err != nil {
-			t.Error("expected nil when stored value is not *AppError")
-		}
-	})
-}
-
-func TestHasError(t *testing.T) {
-	t.Run("returns false when no error", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		if HasError(ctx) {
-			t.Error("expected false when no error is set")
-		}
-	})
-
-	t.Run("returns true when error exists", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		SetError(ctx, ErrInternal("test", nil))
-		if !HasError(ctx) {
-			t.Error("expected true when error is set")
-		}
-	})
-}
-
-func TestClearError(t *testing.T) {
-	t.Run("clears existing error", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		SetError(ctx, ErrInternal("test", nil))
-
-		if !HasError(ctx) {
-			t.Fatal("expected error to be set")
-		}
-
-		ClearError(ctx)
-
-		if HasError(ctx) {
-			t.Error("expected error to be cleared")
-		}
-	})
-
-	t.Run("does not panic when no error", func(t *testing.T) {
-		ctx := WithContext(context.Background())
-		// Should not panic
-		ClearError(ctx)
-	})
-}
-
 func TestSetContextData_GetContextData(t *testing.T) {
 	t.Run("stores and retrieves data", func(t *testing.T) {
 		ctx := WithContext(context.Background())
@@ -170,7 +83,6 @@ func TestSetContextData_GetContextData(t *testing.T) {
 		ctx := WithContext(context.Background())
 		var wg sync.WaitGroup
 
-		// Concurrent writes
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
 			go func(i int) {
@@ -179,7 +91,6 @@ func TestSetContextData_GetContextData(t *testing.T) {
 			}(i)
 		}
 
-		// Concurrent reads
 		for i := 0; i < 100; i++ {
 			wg.Add(1)
 			go func() {
@@ -204,12 +115,11 @@ func TestContextAsMiddleware(t *testing.T) {
 		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
 		gcx.ServeJSON(map[string]string{"status": "ok"})
 
-		middleware := ContextAsMiddleware()
-		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Handler does nothing, response is set via ServeJSON
-		}))
-
-		handler.ServeHTTP(rec, req)
+		mw := ContextAsMiddleware()
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return nil
+		})
+		mw(inner).ServeHTTP(rec, req)
 
 		if rec.Header().Get("Content-Type") != "application/json" {
 			t.Errorf("Content-Type = %s, want application/json", rec.Header().Get("Content-Type"))
@@ -230,10 +140,11 @@ func TestContextAsMiddleware(t *testing.T) {
 		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
 		gcx.ServeRawData("hello world")
 
-		middleware := ContextAsMiddleware()
-		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-
-		handler.ServeHTTP(rec, req)
+		mw := ContextAsMiddleware()
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return nil
+		})
+		mw(inner).ServeHTTP(rec, req)
 
 		if rec.Header().Get("Content-Type") != "text/plain; charset=UTF-8" {
 			t.Errorf("Content-Type = %s, want text/plain; charset=UTF-8", rec.Header().Get("Content-Type"))
@@ -254,17 +165,18 @@ func TestContextAsMiddleware(t *testing.T) {
 		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
 		gcx.ServeHTML("<h1>Hello</h1>")
 
-		middleware := ContextAsMiddleware()
-		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-
-		handler.ServeHTTP(rec, req)
+		mw := ContextAsMiddleware()
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return nil
+		})
+		mw(inner).ServeHTTP(rec, req)
 
 		if rec.Header().Get("Content-Type") != "text/html; charset=UTF-8" {
 			t.Errorf("Content-Type = %s, want text/html; charset=UTF-8", rec.Header().Get("Content-Type"))
 		}
 	})
 
-	t.Run("does not write when error exists", func(t *testing.T) {
+	t.Run("propagates error without writing response", func(t *testing.T) {
 		ctx := WithContext(context.Background())
 		gcx := GetContext(ctx)
 
@@ -274,16 +186,20 @@ func TestContextAsMiddleware(t *testing.T) {
 
 		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
 		gcx.ServeJSON(map[string]string{"status": "ok"})
-		SetError(ctx, ErrBadRequest("error", nil))
 
-		middleware := ContextAsMiddleware()
-		handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		mw := ContextAsMiddleware()
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return ErrBadRequest("error", nil)
+		})
 
-		handler.ServeHTTP(rec, req)
+		// Call the handler directly (not via ServeHTTP) to capture the returned error.
+		err := mw(inner)(req.Context(), rec, req)
 
-		// Should not write anything when error exists
+		if err == nil {
+			t.Error("expected error to be propagated")
+		}
 		if rec.Body.Len() > 0 {
-			t.Error("expected no body when error exists")
+			t.Error("expected no body when handler returns error")
 		}
 	})
 }
@@ -322,7 +238,6 @@ func TestSSEWriter(t *testing.T) {
 		if body == "" {
 			t.Error("expected non-empty body")
 		}
-		// Check contains expected parts
 		if !contains(body, "id: 123") {
 			t.Error("expected id field")
 		}

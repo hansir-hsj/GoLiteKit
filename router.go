@@ -1,6 +1,7 @@
 package golitekit
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"reflect"
@@ -26,7 +27,7 @@ func NewRouter(services *Services) *Router {
 }
 
 // Use adds global middlewares.
-func (r *Router) Use(middlewares ...HandlerMiddleware) *Router {
+func (r *Router) Use(middlewares ...Middleware) *Router {
 	r.middlewares.Use(middlewares...)
 	return r
 }
@@ -51,11 +52,9 @@ func (r *Router) handle(method, path string, c Controller, groupMiddlewares Midd
 	handler := r.wrapController(c, groupMiddlewares)
 
 	// Register the method-specific handler directly (Go 1.22+ pattern syntax).
-	// ServeMux matches "METHOD /path" before the bare "/path" catch-all below.
 	r.mux.Handle(method+" "+path, handler)
 
-	// Register a path-only catch-all once per path to return a JSON 405 for any
-	// method not explicitly registered on this path.
+	// Register a path-only catch-all once per path to return a JSON 405.
 	if _, exists := r.registeredPaths[path]; !exists {
 		r.registeredPaths[path] = struct{}{}
 		appErr := ErrMethodNotAllowed("Method Not Allowed")
@@ -63,7 +62,7 @@ func (r *Router) handle(method, path string, c Controller, groupMiddlewares Midd
 		r.mux.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(appErr.Code)
-			w.Write(body)
+			_, _ = w.Write(body)
 		})
 	}
 }
@@ -76,14 +75,10 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 	}
 
 	// innerHandler is stable: built once at registration, not recreated per request.
-	// It reads gcx from the request context so it captures no per-request state.
-	innerHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		ctx := req.Context()
+	innerHandler := Handler(func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
 		gcx := GetContext(ctx)
 		handler := ctrlPool.Get().(Controller)
 		defer func() {
-			// Prefer the cheap Resettable path; fall back to reflect.Zero for
-			// controllers that do not embed BaseControllerOf[T].
 			if res, ok := handler.(Resettable); ok {
 				res.ResetController()
 			} else {
@@ -93,49 +88,31 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 		}()
 
 		if err := handler.Init(ctx); err != nil {
-			if !HasError(ctx) {
-				SetError(ctx, ErrInternal("Controller init failed", err))
-			}
-			return
+			return WrapError(err, http.StatusInternalServerError)
 		}
 		if err := handler.SanityCheck(ctx); err != nil {
-			if !HasError(ctx) {
-				SetError(ctx, ErrBadRequest("Sanity check failed", err))
-			}
-			return
+			return WrapError(err, http.StatusBadRequest)
 		}
 		if err := handler.ParseRequest(ctx, gcx.RawBody); err != nil {
-			if !HasError(ctx) {
-				SetError(ctx, ErrBadRequest("Parse request failed", err))
-			}
-			return
+			return WrapError(err, http.StatusBadRequest)
 		}
 		if err := handler.Serve(ctx); err != nil {
-			if !HasError(ctx) {
-				SetError(ctx, ErrInternal("Controller serve failed", err))
-			}
-			return
+			return WrapError(err, http.StatusInternalServerError)
 		}
 		if err := handler.Finalize(ctx); err != nil {
-			if !HasError(ctx) {
-				SetError(ctx, ErrInternal("Controller finalize failed", err))
-			}
-			return
+			return WrapError(err, http.StatusInternalServerError)
 		}
+		return nil
 	})
 
 	// Pre-apply the full middleware chain at registration time (not per-request).
-	// This eliminates N closure allocations per request (one per middleware layer).
-	// Requirement: all router.Use() and group.Use() calls must precede route registration.
-	var prebuilt http.Handler = innerHandler
+	var prebuilt Handler = innerHandler
 	if len(groupMiddlewares) > 0 {
 		prebuilt = groupMiddlewares.Apply(prebuilt)
 	}
 	prebuilt = r.middlewares.Apply(prebuilt)
 
 	// Per-request handler: lightweight context injection only.
-	// glkContext is pooled and embeds both Context and LoggerContext by value,
-	// eliminating two context.WithValue allocations per request.
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		glkCtx := newContext(req)
 		req = req.WithContext(glkCtx)
@@ -147,7 +124,13 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 			withServices(r.services),
 		)
 
-		prebuilt.ServeHTTP(w, req)
+		// Errors propagate up through the middleware chain. ErrorHandlerMiddleware
+		// (when present) handles them; otherwise fall back to a plain HTTP error.
+		if err := prebuilt(req.Context(), w, req); err != nil {
+			appErr := WrapError(err, http.StatusInternalServerError)
+			http.Error(w, appErr.Message, appErr.Code)
+		}
+
 		glkCtx.release()
 	})
 }

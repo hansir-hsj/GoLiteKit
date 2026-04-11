@@ -3,6 +3,7 @@ package golitekit
 import (
 	"bufio"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -13,12 +14,11 @@ import (
 
 // CompressionMiddleware compresses responses with gzip when the client accepts it.
 // level is optional; defaults to gzip.DefaultCompression.
-func CompressionMiddleware(level ...int) HandlerMiddleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func CompressionMiddleware(level ...int) Middleware {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-				next.ServeHTTP(w, r)
-				return
+				return next(ctx, w, r)
 			}
 
 			l := gzip.DefaultCompression
@@ -28,8 +28,7 @@ func CompressionMiddleware(level ...int) HandlerMiddleware {
 
 			gz, err := gzip.NewWriterLevel(w, l)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+				return ErrInternal("gzip init failed", err)
 			}
 
 			w.Header().Set("Content-Encoding", "gzip")
@@ -41,15 +40,15 @@ func CompressionMiddleware(level ...int) HandlerMiddleware {
 				Writer:         gz,
 			}
 
-			next.ServeHTTP(gzw, r)
+			err = next(ctx, gzw, r)
 
-			// Close flushes remaining data into the gzip stream.
-			// Errors here may truncate the client response; log to stderr
-			// because the response header is already committed.
-			if err := gz.Close(); err != nil {
-				fmt.Fprintf(os.Stderr, "gzip close error: %v\n", err)
+			// Close flushes remaining data; errors may truncate the client response.
+			if closeErr := gz.Close(); closeErr != nil {
+				fmt.Fprintf(os.Stderr, "gzip close error: %v\n", closeErr)
 			}
-		})
+
+			return err
+		}
 	}
 }
 
@@ -72,11 +71,9 @@ func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
-// Flush flushes the gzip buffer first, then the underlying connection,
-// so streaming responses (e.g. SSE) are delivered to the client promptly.
+// Flush flushes the gzip buffer first, then the underlying connection.
 func (w *gzipResponseWriter) Flush() {
 	if gz, ok := w.Writer.(*gzip.Writer); ok {
-		// Flush compresses and writes buffered data without closing the stream.
 		if err := gz.Flush(); err != nil {
 			fmt.Fprintf(os.Stderr, "gzip flush error: %v\n", err)
 			return
@@ -87,9 +84,7 @@ func (w *gzipResponseWriter) Flush() {
 	}
 }
 
-// Hijack forwards WebSocket / HTTP upgrade requests to the underlying
-// ResponseWriter.  Without this, any WebSocket upgrade through the gzip
-// middleware would fail with "ResponseWriter does not implement Hijacker".
+// Hijack forwards WebSocket / HTTP upgrade requests to the underlying ResponseWriter.
 func (w *gzipResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if hj, ok := w.ResponseWriter.(http.Hijacker); ok {
 		return hj.Hijack()

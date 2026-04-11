@@ -1,9 +1,10 @@
 // middleware demonstrates custom middleware and per-group middleware in GoLiteKit.
 //
 // Routes:
-//   GET /public/ping     no auth required
-//   GET /api/profile     requires X-Token header
-//   GET /api/admin       requires X-Token + X-Admin header
+//
+//	GET /public/ping     no auth required
+//	GET /api/profile     requires X-Token header
+//	GET /api/admin       requires X-Token + X-Admin header
 package main
 
 import (
@@ -17,33 +18,33 @@ import (
 // ---- middleware ------------------------------------------------------------
 
 // RequestIDMiddleware adds a request ID header to every response.
-func RequestIDMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Request-ID", glk.GetTracker(r.Context()).LogID())
-		next.ServeHTTP(w, r)
-	})
+func RequestIDMiddleware(next glk.Handler) glk.Handler {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		if t := glk.GetTracker(ctx); t != nil {
+			w.Header().Set("X-Request-ID", t.LogID())
+		}
+		return next(ctx, w, r)
+	}
 }
 
 // AuthMiddleware rejects requests missing the X-Token header.
-func AuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func AuthMiddleware(next glk.Handler) glk.Handler {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		if r.Header.Get("X-Token") == "" {
-			glk.SetError(r.Context(), glk.ErrUnauthorized("missing X-Token"))
-			return
+			return glk.ErrUnauthorized("missing X-Token")
 		}
-		next.ServeHTTP(w, r)
-	})
+		return next(ctx, w, r)
+	}
 }
 
 // AdminMiddleware rejects requests missing the X-Admin header.
-func AdminMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func AdminMiddleware(next glk.Handler) glk.Handler {
+	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		if r.Header.Get("X-Admin") == "" {
-			glk.SetError(r.Context(), glk.ErrForbidden("admin only"))
-			return
+			return glk.ErrForbidden("admin only")
 		}
-		next.ServeHTTP(w, r)
-	})
+		return next(ctx, w, r)
+	}
 }
 
 // ---- controllers -----------------------------------------------------------

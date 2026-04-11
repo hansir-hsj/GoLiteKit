@@ -1,6 +1,7 @@
 package golitekit
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -157,13 +158,14 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 		rl := NewRateLimiter(rate.Limit(100), 10)
 
 		handlerCalled := false
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			handlerCalled = true
 			w.WriteHeader(http.StatusOK)
+			return nil
 		})
 
 		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(handler)
+		wrapped := middleware(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.1:12345"
@@ -179,17 +181,17 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 	})
 
 	t.Run("blocks requests exceeding limit", func(t *testing.T) {
-		rl := NewRateLimiter(rate.Limit(1), 1) // Very restrictive
+		rl := NewRateLimiter(rate.Limit(1), 1)
 
 		handlerCalled := 0
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			handlerCalled++
+			return nil
 		})
 
 		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(handler)
+		wrapped := middleware(inner)
 
-		// Make multiple requests quickly
 		for i := 0; i < 5; i++ {
 			req := httptest.NewRequest("GET", "/test", nil)
 			req.RemoteAddr = "192.168.1.1:12345"
@@ -200,59 +202,51 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 			wrapped.ServeHTTP(rec, req)
 		}
 
-		// Only 1 request should have been allowed (burst of 1)
 		if handlerCalled != 1 {
 			t.Errorf("handler called %d times, want 1", handlerCalled)
 		}
 	})
 
-	t.Run("sets error when rate limited", func(t *testing.T) {
+	t.Run("returns 429 when rate limited", func(t *testing.T) {
 		rl := NewRateLimiter(rate.Limit(1), 1)
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return nil
+		})
 
 		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(handler)
+		wrapped := middleware(inner)
 
-		// Use up the limit
+		// Use up the limit.
 		req1 := httptest.NewRequest("GET", "/test", nil)
 		req1.RemoteAddr = "192.168.1.1:12345"
-		ctx1 := WithContext(req1.Context())
-		req1 = req1.WithContext(ctx1)
-		wrapped.ServeHTTP(httptest.NewRecorder(), req1)
+		wrapped.ServeHTTP(httptest.NewRecorder(), req1.WithContext(WithContext(req1.Context())))
 
-		// Second request should be rate limited
+		// Second request should be rate limited.
 		req2 := httptest.NewRequest("GET", "/test", nil)
 		req2.RemoteAddr = "192.168.1.1:12345"
-		ctx2 := WithContext(req2.Context())
-		req2 = req2.WithContext(ctx2)
 		rec2 := httptest.NewRecorder()
+		wrapped.ServeHTTP(rec2, req2.WithContext(WithContext(req2.Context())))
 
-		wrapped.ServeHTTP(rec2, req2)
-
-		err := GetError(ctx2)
-		if err == nil {
-			t.Error("expected error to be set when rate limited")
-		}
-		if err != nil && err.Code != http.StatusTooManyRequests {
-			t.Errorf("error code = %d, want %d", err.Code, http.StatusTooManyRequests)
+		if rec2.Code != http.StatusTooManyRequests {
+			t.Errorf("status = %d, want %d", rec2.Code, http.StatusTooManyRequests)
 		}
 	})
 
 	t.Run("global rate limiter works", func(t *testing.T) {
 		rl := NewRateLimiter(rate.Limit(100), 100,
-			WithGlobalRateLimiter(rate.Limit(1), 1), // Global: 1 req/sec, burst 1
+			WithGlobalRateLimiter(rate.Limit(1), 1),
 		)
 
 		handlerCalled := 0
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			handlerCalled++
+			return nil
 		})
 
 		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(handler)
+		wrapped := middleware(inner)
 
-		// Make requests from different IPs
 		for i := 0; i < 5; i++ {
 			req := httptest.NewRequest("GET", "/test", nil)
 			req.RemoteAddr = "192.168.1." + string(rune('1'+i)) + ":12345"
@@ -262,7 +256,6 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 			wrapped.ServeHTTP(httptest.NewRecorder(), req)
 		}
 
-		// Only 1 should be allowed due to global limit
 		if handlerCalled != 1 {
 			t.Errorf("handler called %d times, want 1 (global limit)", handlerCalled)
 		}

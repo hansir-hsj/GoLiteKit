@@ -123,18 +123,18 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 }
 
 // Route registration shortcuts — delegate to the embedded Router.
-func (a *App) GET(path string, c Controller)        { a.Router.GET(path, c) }
-func (a *App) POST(path string, c Controller)       { a.Router.POST(path, c) }
-func (a *App) PUT(path string, c Controller)        { a.Router.PUT(path, c) }
-func (a *App) DELETE(path string, c Controller)     { a.Router.DELETE(path, c) }
-func (a *App) PATCH(path string, c Controller)      { a.Router.PATCH(path, c) }
-func (a *App) HEAD(path string, c Controller)       { a.Router.HEAD(path, c) }
-func (a *App) OPTIONS(path string, c Controller)    { a.Router.OPTIONS(path, c) }
-func (a *App) Any(path string, c Controller)        { a.Router.Any(path, c) }
-func (a *App) Use(middlewares ...HandlerMiddleware) { a.Router.Use(middlewares...) }
-func (a *App) Group(prefix string) *RouterGroup     { return a.Router.Group(prefix) }
-func (a *App) Static(urlPath, fsPath string)        { a.Router.Static(urlPath, fsPath) }
-func (a *App) Handler() http.Handler                { return a.Router.Handler() }
+func (a *App) GET(path string, c Controller)     { a.Router.GET(path, c) }
+func (a *App) POST(path string, c Controller)    { a.Router.POST(path, c) }
+func (a *App) PUT(path string, c Controller)     { a.Router.PUT(path, c) }
+func (a *App) DELETE(path string, c Controller)  { a.Router.DELETE(path, c) }
+func (a *App) PATCH(path string, c Controller)   { a.Router.PATCH(path, c) }
+func (a *App) HEAD(path string, c Controller)    { a.Router.HEAD(path, c) }
+func (a *App) OPTIONS(path string, c Controller) { a.Router.OPTIONS(path, c) }
+func (a *App) Any(path string, c Controller)     { a.Router.Any(path, c) }
+func (a *App) Use(middlewares ...Middleware)     { a.Router.Use(middlewares...) }
+func (a *App) Group(prefix string) *RouterGroup  { return a.Router.Group(prefix) }
+func (a *App) Static(urlPath, fsPath string)     { a.Router.Static(urlPath, fsPath) }
+func (a *App) Handler() http.Handler             { return a.Router.Handler() }
 
 // Run starts the server on the given address.
 func (a *App) Run(addr string) error {

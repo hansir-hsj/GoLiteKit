@@ -9,9 +9,9 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/env"
 )
 
-func TimeoutMiddleware() HandlerMiddleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TimeoutMiddleware() Middleware {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			timeout := env.WriteTimeout()
 
 			if env.SSETimeout() > 0 && r.Header.Get("Accept") == "text/event-stream" {
@@ -19,12 +19,11 @@ func TimeoutMiddleware() HandlerMiddleware {
 			}
 
 			if timeout < 1 {
-				next.ServeHTTP(w, r)
-				return
+				return next(ctx, w, r)
 			}
 
-			ctx, cancel := context.WithTimeoutCause(
-				r.Context(),
+			timeoutCtx, cancel := context.WithTimeoutCause(
+				ctx,
 				timeout,
 				fmt.Errorf("request timeout after %v", timeout),
 			)
@@ -32,45 +31,39 @@ func TimeoutMiddleware() HandlerMiddleware {
 
 			tw := newTimeoutResponseWriter(w)
 
-			doneChan := make(chan struct{})
-			panicChan := make(chan any, 1)
+			type result struct {
+				err   error
+				panic any
+			}
+			resultChan := make(chan result, 1)
 
 			go func() {
 				defer func() {
 					if p := recover(); p != nil {
-						panicChan <- p
+						resultChan <- result{panic: p}
 					}
-					close(doneChan)
 				}()
-
-				next.ServeHTTP(tw, r.WithContext(ctx))
+				err := next(timeoutCtx, tw, r.WithContext(timeoutCtx))
+				resultChan <- result{err: err}
 			}()
 
 			select {
-			case p := <-panicChan:
-				panic(p)
-			case <-ctx.Done():
+			case res := <-resultChan:
+				if res.panic != nil {
+					panic(res.panic)
+				}
+				return res.err
+			case <-timeoutCtx.Done():
 				tw.markTimeout()
-				cause := context.Cause(ctx)
-				SetError(ctx, ErrTimeout(fmt.Sprintf("Request timeout: %v", cause)))
-				// Do not wait for the handler goroutine: it may block on I/O that
-				// ignores context cancellation. Start a background drainer to catch
-				// any late panic and log it, then let the goroutine finish on its own.
+				cause := context.Cause(timeoutCtx)
+				// Drain the goroutine in background; re-panic if it panics.
 				go func() {
-					select {
-					case p := <-panicChan:
-						fmt.Fprintf(os.Stderr, "panic in timed-out handler: %v\n", p)
-					case <-doneChan:
+					if res := <-resultChan; res.panic != nil {
+						fmt.Fprintf(os.Stderr, "panic in timed-out handler: %v\n", res.panic)
 					}
 				}()
-			case <-doneChan:
-				// doneChan is closed inside defer, after an optional panic write, so check panicChan first.
-				select {
-				case p := <-panicChan:
-					panic(p)
-				default:
-				}
+				return ErrTimeout(fmt.Sprintf("Request timeout: %v", cause))
 			}
-		})
+		}
 	}
 }
