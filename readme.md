@@ -102,8 +102,7 @@ type ListUsersController struct {
 
 func (c *ListUsersController) Serve(ctx context.Context) error {
     users := []string{"alice", "bob"}
-    c.ServeData(ctx, users)
-    return nil
+    return c.ServeData(ctx, users)
 }
 ```
 
