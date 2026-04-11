@@ -10,6 +10,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.3.0] - 2026-04-11
+
+### Changed
+- **Error handling unified**: Replace context-based `SetError`/`GetError` with explicit error returns.
+  All middleware and handlers now propagate errors through return values.
+- **Controller interface simplified**: Reduce from 5 methods to just `Serve()`.
+  Optional hooks (`Init`, `Validate`, `Finalize`) are now separate interfaces.
+- Rename `SanityCheck` to `Validate` for clarity.
+- `Handler` type: `func(ctx, w, r) error` — supports error propagation.
+- `Middleware` type: `func(next Handler) Handler` — composable with error handling.
+
+### Added
+- `StdMiddleware` adapter for third-party `http.Handler` middleware (e.g., CORS).
+- `Unwrap()` method on `AppError` for Go 1.13+ `errors.Is`/`errors.As` support.
+- Optional `internal error` parameter for `ErrUnauthorized`, `ErrForbidden`, `ErrNotFound`, etc.
+- Optional lifecycle interfaces: `Initializer`, `Validator`, `RequestParser`, `Finalizer`.
+
+### Removed
+- `SetError`, `GetError`, `HasError`, `ClearError` — use error returns instead.
+- `HandlerMiddleware` type — replaced by `Middleware`.
+
+### Fixed
+- `w.Write()` return values now properly handled in `ContextAsMiddleware`.
+- `ServeData()` return values no longer discarded in examples.
+
+---
+
 ## [v0.2.0] - 2026-04-10
 
 ### Changed
