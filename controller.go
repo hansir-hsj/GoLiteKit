@@ -31,23 +31,38 @@ type RequestSizeLimiter interface {
 // NoBody indicates the controller does not need request body parsing.
 type NoBody struct{}
 
-// Controller is the interface every request handler must implement.
+// Controller is the minimal interface for handling HTTP requests.
+// Embed BaseController and implement Serve() for most use cases.
 type Controller interface {
 	RequestSizeLimiter
-
-	Init(ctx context.Context) error
-	SanityCheck(ctx context.Context) error
-	ParseRequest(ctx context.Context, body []byte) error
 	Serve(ctx context.Context) error
+}
+
+// Optional lifecycle hooks. Implement these interfaces to customize behavior.
+
+// Initializer is called first to set up per-request state.
+type Initializer interface {
+	Init(ctx context.Context) error
+}
+
+// Validator is called after Init to check preconditions (auth, feature flags, etc).
+type Validator interface {
+	Validate(ctx context.Context) error
+}
+
+// RequestParser is called after Validate to parse the request body.
+// BaseControllerOf implements this automatically with JSON/form binding.
+type RequestParser interface {
+	ParseRequest(ctx context.Context, body []byte) error
+}
+
+// Finalizer is called after Serve for cleanup, metrics, or audit logging.
+type Finalizer interface {
 	Finalize(ctx context.Context) error
 }
 
-// Resettable is an optional interface a Controller may implement to perform a
-// cheap in-place field reset before being returned to its per-route sync.Pool.
-// If a controller does not implement Resettable, the router falls back to
-// reflect.Zero to clear all fields.
-// BaseControllerOf[T] implements Resettable automatically, so any controller
-// that embeds BaseController or BaseControllerOf[T] gets this for free.
+// Resettable allows cheap in-place reset before returning to sync.Pool.
+// BaseControllerOf implements this automatically.
 type Resettable interface {
 	ResetController()
 }
@@ -102,7 +117,7 @@ func (c *BaseControllerOf[T]) Redis() *redis.Client {
 	return c.gcx.Redis()
 }
 
-func (c *BaseControllerOf[T]) SanityCheck(ctx context.Context) error {
+func (c *BaseControllerOf[T]) Validate(ctx context.Context) error {
 	return nil
 }
 

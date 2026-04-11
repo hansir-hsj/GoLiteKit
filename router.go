@@ -87,20 +87,29 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 			ctrlPool.Put(handler)
 		}()
 
-		if err := handler.Init(ctx); err != nil {
-			return WrapError(err, http.StatusInternalServerError)
+		// Call optional lifecycle hooks if implemented
+		if init, ok := handler.(Initializer); ok {
+			if err := init.Init(ctx); err != nil {
+				return WrapError(err, http.StatusInternalServerError)
+			}
 		}
-		if err := handler.SanityCheck(ctx); err != nil {
-			return WrapError(err, http.StatusBadRequest)
+		if val, ok := handler.(Validator); ok {
+			if err := val.Validate(ctx); err != nil {
+				return WrapError(err, http.StatusBadRequest)
+			}
 		}
-		if err := handler.ParseRequest(ctx, gcx.RawBody); err != nil {
-			return WrapError(err, http.StatusBadRequest)
+		if parser, ok := handler.(RequestParser); ok {
+			if err := parser.ParseRequest(ctx, gcx.RawBody); err != nil {
+				return WrapError(err, http.StatusBadRequest)
+			}
 		}
 		if err := handler.Serve(ctx); err != nil {
 			return WrapError(err, http.StatusInternalServerError)
 		}
-		if err := handler.Finalize(ctx); err != nil {
-			return WrapError(err, http.StatusInternalServerError)
+		if fin, ok := handler.(Finalizer); ok {
+			if err := fin.Finalize(ctx); err != nil {
+				return WrapError(err, http.StatusInternalServerError)
+			}
 		}
 		return nil
 	})
