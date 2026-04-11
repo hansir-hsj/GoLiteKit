@@ -1,6 +1,7 @@
 package golitekit
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,23 +11,23 @@ import (
 )
 
 func TestTimeoutMiddleware_Normal(t *testing.T) {
-	// Initialize env with a test config
 	err := env.Init("env/app.toml")
 	if err != nil {
 		t.Skip("env not initialized, skipping timeout test: " + err.Error())
 	}
 
 	t.Run("completes before timeout", func(t *testing.T) {
-		middleware := TimeoutMiddleware()
+		mw := TimeoutMiddleware()
 
 		handlerCalled := false
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			handlerCalled = true
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("success"))
+			return nil
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		ctx := WithContext(req.Context())
@@ -42,22 +43,21 @@ func TestTimeoutMiddleware_Normal(t *testing.T) {
 }
 
 func TestTimeoutMiddleware_ZeroTimeout(t *testing.T) {
-	// This test verifies the behavior when timeout is configured as 0
-	// Since TimeoutMiddleware reads from env, we need env to be initialized
 	err := env.Init("env/app.toml")
 	if err != nil {
 		t.Skip("env not initialized, skipping test: " + err.Error())
 	}
 
 	t.Run("handler is called when timeout is configured", func(t *testing.T) {
-		middleware := TimeoutMiddleware()
+		mw := TimeoutMiddleware()
 
 		handlerCalled := false
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			handlerCalled = true
+			return nil
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		rec := httptest.NewRecorder()
@@ -75,7 +75,6 @@ func TestTimeoutResponseWriter(t *testing.T) {
 		rec := httptest.NewRecorder()
 		tw := newTimeoutResponseWriter(rec)
 
-		// Write before timeout
 		n, err := tw.Write([]byte("before"))
 		if err != nil {
 			t.Errorf("Write before timeout failed: %v", err)
@@ -84,10 +83,8 @@ func TestTimeoutResponseWriter(t *testing.T) {
 			t.Errorf("bytes written = %d, want 6", n)
 		}
 
-		// Mark as timed out
 		tw.markTimeout()
 
-		// Write after timeout should fail
 		n, err = tw.Write([]byte("after"))
 		if err != http.ErrHandlerTimeout {
 			t.Errorf("error = %v, want ErrHandlerTimeout", err)
@@ -104,7 +101,6 @@ func TestTimeoutResponseWriter(t *testing.T) {
 		tw.markTimeout()
 		tw.WriteHeader(http.StatusCreated)
 
-		// Status should remain default (not changed)
 		if tw.statusCode != http.StatusOK {
 			t.Errorf("status = %d, should not change after timeout", tw.statusCode)
 		}
@@ -115,7 +111,7 @@ func TestTimeoutResponseWriter(t *testing.T) {
 		tw := newTimeoutResponseWriter(rec)
 
 		tw.WriteHeader(http.StatusCreated)
-		tw.WriteHeader(http.StatusNotFound) // Should be ignored
+		tw.WriteHeader(http.StatusNotFound)
 
 		if tw.statusCode != http.StatusCreated {
 			t.Errorf("status = %d, want %d", tw.statusCode, http.StatusCreated)
@@ -127,8 +123,6 @@ func TestTimeoutResponseWriter(t *testing.T) {
 		tw := newTimeoutResponseWriter(rec)
 
 		tw.markTimeout()
-
-		// Should not panic
 		tw.Flush()
 	})
 }
@@ -140,21 +134,19 @@ func TestTimeoutMiddleware_SSE(t *testing.T) {
 	}
 
 	t.Run("uses SSE timeout for event-stream requests", func(t *testing.T) {
-		middleware := TimeoutMiddleware()
+		mw := TimeoutMiddleware()
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Check if context has appropriate timeout
-			ctx := r.Context()
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			deadline, ok := ctx.Deadline()
 			if ok {
 				remaining := time.Until(deadline)
-				// SSE timeout should be longer than regular timeout
 				t.Logf("SSE request has deadline in %v", remaining)
 			}
 			w.WriteHeader(http.StatusOK)
+			return nil
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/events", nil)
 		req.Header.Set("Accept", "text/event-stream")

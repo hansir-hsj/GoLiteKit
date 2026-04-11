@@ -19,7 +19,7 @@ type RestControllerOf[T any] struct {
 	BaseControllerOf[T]
 }
 
-func (c *RestControllerOf[T]) ServeData(ctx context.Context, data any) {
+func (c *RestControllerOf[T]) ServeData(ctx context.Context, data any) error {
 	logID := ""
 	if tracker := GetTracker(ctx); tracker != nil {
 		logID = tracker.LogID()
@@ -30,52 +30,43 @@ func (c *RestControllerOf[T]) ServeData(ctx context.Context, data any) {
 		Data:   data,
 		LogID:  logID,
 	}
-	if err := c.ServeJSON(res); err != nil {
-		SetError(ctx, ErrInternal("failed to serialize response", err))
-	}
+	return c.ServeJSON(res)
 }
 
-func (c *RestControllerOf[T]) ServeOK(ctx context.Context) {
-	c.ServeData(ctx, nil)
+func (c *RestControllerOf[T]) ServeOK(ctx context.Context) error {
+	return c.ServeData(ctx, nil)
 }
 
-func (c *RestControllerOf[T]) ServeMsgData(ctx context.Context, msg string, data any) {
+func (c *RestControllerOf[T]) ServeMsgData(ctx context.Context, msg string, data any) error {
 	logID := ""
 	if tracker := GetTracker(ctx); tracker != nil {
 		logID = tracker.LogID()
 	}
-
 	res := Response{
 		Status: OK,
 		Msg:    msg,
 		Data:   data,
 		LogID:  logID,
 	}
-	if err := c.ServeJSON(res); err != nil {
-		SetError(ctx, ErrInternal("failed to serialize response", err))
-	}
+	return c.ServeJSON(res)
 }
 
-func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg string) {
+func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg string) error {
 	logID := ""
 	if tracker := GetTracker(ctx); tracker != nil {
 		logID = tracker.LogID()
 	}
-
 	res := Response{
 		Status: status,
 		Msg:    msg,
 		LogID:  logID,
 	}
-	if err := c.ServeJSON(res); err != nil {
-		SetError(ctx, ErrInternal("failed to serialize response", err))
-	}
+	return c.ServeJSON(res)
 }
 
-func (c *RestControllerOf[T]) ServeErrorMsg(ctx context.Context, msg string) {
-	c.ServeError(ctx, -1, msg)
+func (c *RestControllerOf[T]) ServeErrorMsg(ctx context.Context, msg string) error {
+	return c.ServeError(ctx, -1, msg)
 }
 
 // RestController is the no-body REST controller (alias for RestControllerOf[NoBody]).
-// Embed this for GET/DELETE endpoints that don't parse a request body.
 type RestController = RestControllerOf[NoBody]

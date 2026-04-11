@@ -282,16 +282,16 @@ func TestBaseController_BadRequest(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	appErr := GetError(req.Context())
-	if appErr == nil {
-		t.Fatal("expected AppError in context")
+	appErr, ok := err.(*AppError)
+	if !ok {
+		t.Fatal("expected *AppError")
 	}
 	if appErr.Code != http.StatusBadRequest {
 		t.Errorf("code = %d, want %d", appErr.Code, http.StatusBadRequest)
 	}
 }
 
-func TestBaseController_HasError(t *testing.T) {
+func TestBaseController_InternalError(t *testing.T) {
 	req, _, _ := makeRequest(http.MethodGet, "/", nil, "")
 
 	c := &BaseController{}
@@ -299,13 +299,17 @@ func TestBaseController_HasError(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	if c.HasError() {
-		t.Error("expected no error initially")
+	err := c.InternalError("oops", nil)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 
-	c.InternalError("oops", nil)
-	if !c.HasError() {
-		t.Error("expected HasError to return true after error is set")
+	appErr, ok := err.(*AppError)
+	if !ok {
+		t.Fatal("expected *AppError")
+	}
+	if appErr.Code != http.StatusInternalServerError {
+		t.Errorf("code = %d, want %d", appErr.Code, http.StatusInternalServerError)
 	}
 }
 

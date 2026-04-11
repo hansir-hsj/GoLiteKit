@@ -125,14 +125,13 @@ func (c *GetUserController) Serve(ctx context.Context) error {
 
 ```go
 // 自定义中间件
-func AuthMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func AuthMiddleware(next glk.Handler) glk.Handler {
+    return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
         if r.Header.Get("Authorization") == "" {
-            glk.SetError(r.Context(), glk.ErrUnauthorized("missing token"))
-            return
+            return glk.ErrUnauthorized("missing token")
         }
-        next.ServeHTTP(w, r)
-    })
+        return next(ctx, w, r)
+    }
 }
 
 // 全局应用
@@ -221,7 +220,7 @@ app, err := glk.NewAppFromConfig("app.toml")
 | 目录 | 说明 |
 |------|------|
 | [examples/hello](examples/hello) | 最简单的 GET 接口 |
-| [examples/rest-api](examples/rest-api) | REST 控制器：JSON 绑定 + 路径参数 |
+| [examples/rest_api](examples/rest_api) | REST 控制器：JSON 绑定 + 路径参数 |
 | [examples/middleware](examples/middleware) | 自定义中间件 + 路由组 |
 | [examples/sse](examples/sse) | SSE 流式响应 |
 

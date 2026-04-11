@@ -1,6 +1,7 @@
 package golitekit
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,15 +10,13 @@ import (
 
 func TestErrorHandlerMiddleware_AppError(t *testing.T) {
 	t.Run("handles AppError and returns JSON response", func(t *testing.T) {
-		middleware := ErrorHandlerMiddleware()
+		mw := ErrorHandlerMiddleware()
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := WithContext(r.Context())
-			r = r.WithContext(ctx)
-			SetError(ctx, ErrBadRequest("invalid input", nil))
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return ErrBadRequest("invalid input", nil)
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(WithContext(req.Context()))
@@ -64,13 +63,13 @@ func TestErrorHandlerMiddleware_AppError(t *testing.T) {
 
 		for _, tc := range testCases {
 			t.Run(tc.name, func(t *testing.T) {
-				middleware := ErrorHandlerMiddleware()
+				mw := ErrorHandlerMiddleware()
 
-				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-					SetError(r.Context(), tc.err)
+				inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+					return tc.err
 				})
 
-				wrapped := middleware(handler)
+				wrapped := mw(inner)
 
 				req := httptest.NewRequest("GET", "/test", nil)
 				req = req.WithContext(WithContext(req.Context()))
@@ -88,19 +87,18 @@ func TestErrorHandlerMiddleware_AppError(t *testing.T) {
 
 func TestErrorHandlerMiddleware_Panic(t *testing.T) {
 	t.Run("recovers from panic and returns 500", func(t *testing.T) {
-		middleware := ErrorHandlerMiddleware()
+		mw := ErrorHandlerMiddleware()
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			panic("something went wrong")
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(WithContext(req.Context()))
 		rec := httptest.NewRecorder()
 
-		// Should not panic
 		wrapped.ServeHTTP(rec, req)
 
 		if rec.Code != http.StatusInternalServerError {
@@ -121,18 +119,18 @@ func TestErrorHandlerMiddleware_Panic(t *testing.T) {
 		var panicValue any
 		var panicRequest *http.Request
 
-		middleware := ErrorHandlerMiddleware(
+		mw := ErrorHandlerMiddleware(
 			WithPanicCallback(func(r *http.Request, recovered any) {
 				panicValue = recovered
 				panicRequest = r
 			}),
 		)
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			panic("test panic")
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/callback-test", nil)
 		req = req.WithContext(WithContext(req.Context()))
@@ -151,15 +149,16 @@ func TestErrorHandlerMiddleware_Panic(t *testing.T) {
 
 func TestErrorHandlerMiddleware_NoError(t *testing.T) {
 	t.Run("commits response when no error", func(t *testing.T) {
-		middleware := ErrorHandlerMiddleware()
+		mw := ErrorHandlerMiddleware()
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			w.Header().Set("X-Custom", "value")
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte("created"))
+			return nil
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("POST", "/test", nil)
 		req = req.WithContext(WithContext(req.Context()))
@@ -187,15 +186,15 @@ func TestErrorHandlerMiddleware_CustomFormatter(t *testing.T) {
 			w.Write([]byte("Custom: " + err.Message))
 		}
 
-		middleware := ErrorHandlerMiddleware(
+		mw := ErrorHandlerMiddleware(
 			WithErrorFormatter(customFormatter),
 		)
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			SetError(r.Context(), ErrNotFound("item not found"))
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return ErrNotFound("item not found")
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(WithContext(req.Context()))
@@ -217,18 +216,18 @@ func TestErrorHandlerMiddleware_ErrorCallback(t *testing.T) {
 		var callbackErr *AppError
 		var callbackReq *http.Request
 
-		middleware := ErrorHandlerMiddleware(
+		mw := ErrorHandlerMiddleware(
 			WithErrorCallback(func(r *http.Request, err *AppError) {
 				callbackErr = err
 				callbackReq = r
 			}),
 		)
 
-		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			SetError(r.Context(), ErrBadRequest("test error", nil))
+		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return ErrBadRequest("test error", nil)
 		})
 
-		wrapped := middleware(handler)
+		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(WithContext(req.Context()))

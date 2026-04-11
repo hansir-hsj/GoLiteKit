@@ -126,14 +126,13 @@ func (c *GetUserController) Serve(ctx context.Context) error {
 
 ```go
 // Custom middleware
-func AuthMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func AuthMiddleware(next glk.Handler) glk.Handler {
+    return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
         if r.Header.Get("Authorization") == "" {
-            glk.SetError(r.Context(), glk.ErrUnauthorized("missing token"))
-            return
+            return glk.ErrUnauthorized("missing token")
         }
-        next.ServeHTTP(w, r)
-    })
+        return next(ctx, w, r)
+    }
 }
 
 // Apply globally
@@ -222,7 +221,7 @@ app, err := glk.NewAppFromConfig("app.toml")
 | Directory | Description |
 |-----------|-------------|
 | [examples/hello](examples/hello) | Minimal GET endpoint |
-| [examples/rest-api](examples/rest-api) | REST controller with JSON binding and path params |
+| [examples/rest_api](examples/rest_api) | REST controller with JSON binding and path params |
 | [examples/middleware](examples/middleware) | Custom middleware and route groups |
 | [examples/sse](examples/sse) | SSE streaming response |
 

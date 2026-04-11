@@ -1,6 +1,7 @@
 package golitekit
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -45,8 +46,9 @@ var deferredWriterPool = sync.Pool{
 	},
 }
 
-// ErrorHandlerMiddleware handles errors. Place at outermost middleware layer.
-func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
+// ErrorHandlerMiddleware is the outermost middleware. It catches errors returned
+// by inner handlers and panics, writing appropriate JSON responses.
+func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
 	cfg := &errorHandlerConfig{
 		formatter: defaultErrorFormatter,
 	}
@@ -54,12 +56,11 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 		opt(cfg)
 	}
 
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			dw := deferredWriterPool.Get().(*deferredResponseWriter)
 			dw.ResponseWriter = w
 
-			// Return to pool after the request completes (runs last due to LIFO).
 			defer func() {
 				dw.resetForPool()
 				deferredWriterPool.Put(dw)
@@ -67,22 +68,22 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) HandlerMiddleware {
 
 			defer func() {
 				if p := recover(); p != nil {
+					dw.Reset()
 					handlePanic(w, r, p, cfg)
 				}
 			}()
 
-			next.ServeHTTP(dw, r)
+			err := next(ctx, dw, r)
 
-			ctx := r.Context()
-
-			if appErr := GetError(ctx); appErr != nil && !dw.IsFlushed() {
+			if err != nil && !dw.IsFlushed() {
 				dw.Reset()
-				handleAppError(w, r, appErr, cfg)
-				return
+				handleAppError(w, r, WrapError(err, http.StatusInternalServerError), cfg)
+				return nil
 			}
 
 			dw.Commit()
-		})
+			return nil
+		}
 	}
 }
 

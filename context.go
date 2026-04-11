@@ -14,13 +14,9 @@ import (
 	"gorm.io/gorm"
 )
 
-const (
-	globalContextKey ContextKey = iota
-	AppErrorKey                 = "__app_error__"
-)
+const globalContextKey ContextKey = iota
 
 // reset clears all request-scoped fields so the instance can be reused from the pool.
-// If the data map already exists it is cleared in-place to avoid a new allocation.
 func (gcx *Context) reset() {
 	gcx.request = nil
 	gcx.RawBody = nil
@@ -33,16 +29,14 @@ func (gcx *Context) reset() {
 	gcx.rawHtml = ""
 	gcx.statusCode = 0
 	gcx.sseWriter = nil
-	// Reuse the existing map (clear entries) or leave nil for lazy init.
 	for k := range gcx.data {
 		delete(gcx.data, k)
 	}
 }
 
 // glkContext is a pooled context that embeds both the GoLiteKit Context and the
-// logger's LoggerContext by value.  Embedding them here avoids two
-// context.WithValue allocations (and the two valueCtx struct allocs) that would
-// otherwise occur on every request.
+// logger's LoggerContext by value, avoiding two context.WithValue allocations
+// per request.
 type glkContext struct {
 	parent    context.Context
 	gcx       Context              // embedded by value — no separate allocation
@@ -58,7 +52,6 @@ func (c *glkContext) Done() <-chan struct{}       { return c.parent.Done() }
 func (c *glkContext) Err() error                  { return c.parent.Err() }
 
 // Value answers the two framework-owned keys directly (O(1), no chain walk).
-// All other keys are delegated to the parent context.
 func (c *glkContext) Value(key any) any {
 	switch key {
 	case globalContextKey:
@@ -66,7 +59,6 @@ func (c *glkContext) Value(key any) any {
 	case logger.LoggerKey:
 		return &c.loggerCtx
 	case trackerKey:
-		// Only expose the embedded tracker once it has been initialized by WithTracker.
 		if c.tracker.started {
 			return &c.tracker
 		}
@@ -83,9 +75,8 @@ func (c *glkContext) release() {
 	glkCtxPool.Put(c)
 }
 
-// newContext retrieves a *glkContext from the pool, attaches the request's
-// parent context, and returns it ready for use.  The caller must call
-// glkCtx.release() after the request completes.
+// newContext retrieves a *glkContext from the pool and attaches the request's
+// parent context. The caller must call glkCtx.release() after the request.
 func newContext(r *http.Request) *glkContext {
 	gctx := glkCtxPool.Get().(*glkContext)
 	gctx.parent = r.Context()
@@ -148,7 +139,7 @@ func GetContext(ctx context.Context) *Context {
 func WithContext(ctx context.Context) context.Context {
 	gcx := GetContext(ctx)
 	if gcx == nil {
-		gcx = &Context{} // data map is lazily initialized on first SetContextData call
+		gcx = &Context{}
 		return context.WithValue(ctx, globalContextKey, gcx)
 	}
 	return ctx
@@ -189,54 +180,6 @@ func GetContextData(ctx context.Context, key string) (any, bool) {
 		}
 	}
 	return nil, false
-}
-
-func SetError(ctx context.Context, err *AppError) {
-	gcx := GetContext(ctx)
-	if gcx != nil {
-		gcx.setError(err)
-	}
-}
-
-// setError sets an error on this context (thread-safe).
-func (gcx *Context) setError(err *AppError) {
-	gcx.dataLock.Lock()
-	defer gcx.dataLock.Unlock()
-	if gcx.data == nil {
-		gcx.data = make(map[string]any)
-	}
-	gcx.data[AppErrorKey] = err
-}
-
-func GetError(ctx context.Context) *AppError {
-	gcx := GetContext(ctx)
-	if gcx != nil {
-		gcx.dataLock.RLock()
-		defer gcx.dataLock.RUnlock()
-		if gcx.data != nil {
-			if v, ok := gcx.data[AppErrorKey]; ok {
-				if err, ok := v.(*AppError); ok {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func HasError(ctx context.Context) bool {
-	return GetError(ctx) != nil
-}
-
-func ClearError(ctx context.Context) {
-	gcx := GetContext(ctx)
-	if gcx != nil {
-		gcx.dataLock.Lock()
-		defer gcx.dataLock.Unlock()
-		if gcx.data != nil {
-			delete(gcx.data, AppErrorKey)
-		}
-	}
 }
 
 func (gcx *Context) SetContextOptions(opts ...ContextOption) *Context {
@@ -312,21 +255,20 @@ func (ctx *Context) ServeHTML(html string) {
 	ctx.rawHtml = html
 }
 
-func ContextAsMiddleware() HandlerMiddleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Run the handler chain.
-			next.ServeHTTP(w, r)
-
-			ctx := r.Context()
-			gcx := GetContext(ctx)
-			if gcx == nil {
-				return
+// ContextAsMiddleware writes the buffered response stored in Context (via
+// ServeJSON / ServeRawData / ServeHTML) after the inner handler returns.
+// Errors returned by the inner handler are propagated without writing a response.
+func ContextAsMiddleware() Middleware {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			err := next(ctx, w, r)
+			if err != nil {
+				return err
 			}
 
-			// Skip response write on error; ErrorHandlerMiddleware handles it.
-			if HasError(ctx) {
-				return
+			gcx := GetContext(ctx)
+			if gcx == nil {
+				return nil
 			}
 
 			statusCode := http.StatusOK
@@ -338,37 +280,46 @@ func ContextAsMiddleware() HandlerMiddleware {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(statusCode)
 				if bytes, ok := gcx.jsonResponse.([]byte); ok {
-					w.Write(bytes)
+					if _, err := w.Write(bytes); err != nil {
+						return ErrInternal("failed to write response", err)
+					}
 				} else {
 					jsonData, err := json.Marshal(gcx.jsonResponse)
 					if err != nil {
-						SetError(ctx, ErrInternal("Failed to marshal JSON response", err))
-						return
+						return ErrInternal("Failed to marshal JSON response", err)
 					}
-					w.Write(jsonData)
+					if _, err := w.Write(jsonData); err != nil {
+						return ErrInternal("failed to write response", err)
+					}
 				}
 			} else if gcx.rawResponse != nil {
 				switch body := gcx.rawResponse.(type) {
 				case []byte:
 					w.Header().Set("Content-Type", "application/octet-stream")
 					w.WriteHeader(statusCode)
-					w.Write(body)
+					if _, err := w.Write(body); err != nil {
+						return ErrInternal("failed to write response", err)
+					}
 				case string:
 					w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
 					w.WriteHeader(statusCode)
-					w.Write([]byte(body))
+					if _, err := w.Write([]byte(body)); err != nil {
+						return ErrInternal("failed to write response", err)
+					}
 				default:
-					SetError(ctx, ErrInternal("Unsupported response type", nil))
-					return
+					return ErrInternal("Unsupported response type", nil)
 				}
 			} else if gcx.rawHtml != "" {
 				w.Header().Set("Content-Type", "text/html; charset=UTF-8")
 				w.WriteHeader(statusCode)
-				w.Write([]byte(gcx.rawHtml))
+				if _, err := w.Write([]byte(gcx.rawHtml)); err != nil {
+					return ErrInternal("failed to write response", err)
+				}
 			}
-		})
-	}
 
+			return nil
+		}
+	}
 }
 
 func (sse *SSEWriter) Send(event SSEvent) error {
@@ -466,7 +417,6 @@ func (ctx *Context) Param(key string) string {
 }
 
 // JSON writes JSON response with status code.
-// The response is buffered and written via ContextAsMiddleware.
 func (ctx *Context) JSON(code int, data any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -478,7 +428,6 @@ func (ctx *Context) JSON(code int, data any) error {
 }
 
 // String writes plain text response with status code.
-// The response is buffered and written via ContextAsMiddleware.
 func (ctx *Context) String(code int, s string) error {
 	ctx.statusCode = code
 	ctx.rawResponse = s
@@ -486,7 +435,6 @@ func (ctx *Context) String(code int, s string) error {
 }
 
 // HTML writes HTML response with status code.
-// The response is buffered and written via ContextAsMiddleware.
 func (ctx *Context) HTML(code int, html string) error {
 	ctx.statusCode = code
 	ctx.rawHtml = html
