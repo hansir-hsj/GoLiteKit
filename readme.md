@@ -11,7 +11,7 @@ A lightweight Go web framework built on `net/http`, designed for simplicity and 
 ## Performance
 
 GoLiteKit benchmarks within **4% of Gin** on JSON-binding workloads.
-Pure routing overhead is ~20% higher due to pooled context, response buffering, and structured logging —
+Pure routing overhead is ~25% higher due to pooled context, response buffering, and structured logging —
 features that plain routers omit. Full results: [`benchmarks/`](benchmarks/)
 
 ## Features

@@ -42,6 +42,16 @@ type Controller interface {
 	Finalize(ctx context.Context) error
 }
 
+// Resettable is an optional interface a Controller may implement to perform a
+// cheap in-place field reset before being returned to its per-route sync.Pool.
+// If a controller does not implement Resettable, the router falls back to
+// reflect.Zero to clear all fields.
+// BaseControllerOf[T] implements Resettable automatically, so any controller
+// that embeds BaseController or BaseControllerOf[T] gets this for free.
+type Resettable interface {
+	ResetController()
+}
+
 // BaseControllerOf is a generic controller base. T is the request struct type.
 // Use BaseController directly when no request body is needed.
 type BaseControllerOf[T any] struct {
@@ -313,6 +323,17 @@ func (c *BaseControllerOf[T]) Serve(ctx context.Context) error {
 
 func (c *BaseControllerOf[T]) Finalize(ctx context.Context) error {
 	return nil
+}
+
+// ResetController implements Resettable. It clears all base fields so the
+// instance can be safely returned to the per-route sync.Pool without a
+// reflect.Zero call.
+func (c *BaseControllerOf[T]) ResetController() {
+	c.request = nil
+	c.logger = nil
+	c.gcx = nil
+	var zero T
+	c.Request = zero
 }
 
 func (c *BaseControllerOf[T]) GetRequest() T {

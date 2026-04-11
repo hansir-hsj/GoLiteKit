@@ -9,19 +9,19 @@ import (
 
 // Router handles route registration and middleware.
 type Router struct {
-	mux            *http.ServeMux
-	methodHandlers map[string]map[string]http.Handler // path -> method -> handler
-	middlewares    MiddlewareQueue
-	services       *Services
+	mux             *http.ServeMux
+	registeredPaths map[string]struct{} // tracks paths that already have a 405 catch-all
+	middlewares     MiddlewareQueue
+	services        *Services
 }
 
 // NewRouter creates a new Router.
 func NewRouter(services *Services) *Router {
 	return &Router{
-		mux:            http.NewServeMux(),
-		methodHandlers: make(map[string]map[string]http.Handler),
-		middlewares:    NewMiddlewareQueue(),
-		services:       services,
+		mux:             http.NewServeMux(),
+		registeredPaths: make(map[string]struct{}),
+		middlewares:     NewMiddlewareQueue(),
+		services:        services,
 	}
 }
 
@@ -50,21 +50,22 @@ func (r *Router) Any(path string, c Controller) {
 func (r *Router) handle(method, path string, c Controller, groupMiddlewares MiddlewareQueue) {
 	handler := r.wrapController(c, groupMiddlewares)
 
-	if r.methodHandlers[path] == nil {
-		r.methodHandlers[path] = make(map[string]http.Handler)
+	// Register the method-specific handler directly (Go 1.22+ pattern syntax).
+	// ServeMux matches "METHOD /path" before the bare "/path" catch-all below.
+	r.mux.Handle(method+" "+path, handler)
+
+	// Register a path-only catch-all once per path to return a JSON 405 for any
+	// method not explicitly registered on this path.
+	if _, exists := r.registeredPaths[path]; !exists {
+		r.registeredPaths[path] = struct{}{}
+		appErr := ErrMethodNotAllowed("Method Not Allowed")
+		body, _ := json.Marshal(Response{Status: appErr.Code, Msg: appErr.Message})
 		r.mux.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
-			if h, ok := r.methodHandlers[path][req.Method]; ok {
-				h.ServeHTTP(w, req)
-			} else {
-				appErr := ErrMethodNotAllowed("Method Not Allowed")
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				w.WriteHeader(appErr.Code)
-				json.NewEncoder(w).Encode(Response{Status: appErr.Code, Msg: appErr.Message})
-			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(appErr.Code)
+			w.Write(body)
 		})
 	}
-
-	r.methodHandlers[path][method] = handler
 }
 
 func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) http.Handler {
@@ -81,8 +82,13 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 		gcx := GetContext(ctx)
 		handler := ctrlPool.Get().(Controller)
 		defer func() {
-			// Zero all fields and return to the pool to avoid GC churn.
-			reflect.ValueOf(handler).Elem().Set(reflect.Zero(t))
+			// Prefer the cheap Resettable path; fall back to reflect.Zero for
+			// controllers that do not embed BaseControllerOf[T].
+			if res, ok := handler.(Resettable); ok {
+				res.ResetController()
+			} else {
+				reflect.ValueOf(handler).Elem().Set(reflect.Zero(t))
+			}
 			ctrlPool.Put(handler)
 		}()
 
