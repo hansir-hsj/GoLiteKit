@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/config"
@@ -39,8 +40,6 @@ type RConfig struct {
 
 type Config struct {
 	RConfig `toml:"redis"`
-
-	redis.Options
 }
 
 func parse(conf string) (*Config, error) {
@@ -48,39 +47,49 @@ func parse(conf string) (*Config, error) {
 	if err := config.Parse(conf, &redisConfig); err != nil {
 		return nil, fmt.Errorf("failed to parse redis config: %w", err)
 	}
-
-	options := redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", redisConfig.Host, redisConfig.Port),
-		Username: redisConfig.RConfig.Username,
-		Password: redisConfig.RConfig.Password,
-		DB:       redisConfig.RConfig.DB,
-	}
-
-	if redisConfig.RConfigTimeout.DialTimeout > 0 {
-		options.DialTimeout = time.Duration(redisConfig.RConfigTimeout.DialTimeout) * time.Millisecond
-	}
-	if redisConfig.RConfigTimeout.ReadTimeout > 0 {
-		options.ReadTimeout = time.Duration(redisConfig.RConfigTimeout.ReadTimeout) * time.Millisecond
-	}
-	if redisConfig.RConfigTimeout.WriteTimeout > 0 {
-		options.WriteTimeout = time.Duration(redisConfig.RConfigTimeout.WriteTimeout) * time.Millisecond
-	}
-	if redisConfig.RConfigTimeout.PoolTimeout > 0 {
-		options.PoolTimeout = time.Duration(redisConfig.RConfigTimeout.PoolTimeout) * time.Millisecond
-	}
-	if redisConfig.RConfigConn.PoolSize > 0 {
-		options.PoolSize = redisConfig.RConfigConn.PoolSize
-	}
-	if redisConfig.RConfigConn.MinIdleConns > 0 {
-		options.MinIdleConns = redisConfig.RConfigConn.MinIdleConns
-	}
-	if redisConfig.RConfigConn.MaxIdleConns > 0 {
-		options.MaxIdleConns = redisConfig.RConfigConn.MaxIdleConns
-	}
-
-	redisConfig.Options = options
-
 	return &redisConfig, nil
+}
+
+func buildOptions(cfg *Config) redis.Options {
+	opts := redis.Options{
+		Addr:     fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Password: cfg.Password,
+		DB:       cfg.DB,
+	}
+
+	if cfg.Username != "" {
+		opts.Username = cfg.Username
+	}
+	if cfg.Protocol != "" {
+		if p, err := strconv.Atoi(cfg.Protocol); err == nil {
+			opts.Protocol = p
+		}
+	}
+
+	if cfg.PoolTimeout > 0 {
+		opts.PoolTimeout = time.Duration(cfg.PoolTimeout) * time.Millisecond
+	}
+	if cfg.DialTimeout > 0 {
+		opts.DialTimeout = time.Duration(cfg.DialTimeout) * time.Millisecond
+	}
+	if cfg.ReadTimeout > 0 {
+		opts.ReadTimeout = time.Duration(cfg.ReadTimeout) * time.Millisecond
+	}
+	if cfg.WriteTimeout > 0 {
+		opts.WriteTimeout = time.Duration(cfg.WriteTimeout) * time.Millisecond
+	}
+
+	if cfg.PoolSize > 0 {
+		opts.PoolSize = cfg.PoolSize
+	}
+	if cfg.MinIdleConns > 0 {
+		opts.MinIdleConns = cfg.MinIdleConns
+	}
+	if cfg.MaxIdleConns > 0 {
+		opts.MaxIdleConns = cfg.MaxIdleConns
+	}
+
+	return opts
 }
 
 // NewFromConfig creates a new Redis client from config file
@@ -97,12 +106,16 @@ func NewFromConfig(conf ...string) (*redis.Client, error) {
 		return nil, err
 	}
 
-	rdb := redis.NewClient(&cfg.Options)
+	opts := buildOptions(cfg)
+	rdb := redis.NewClient(&opts)
+
 	pong, err := rdb.Ping(context.Background()).Result()
 	if err != nil {
+		rdb.Close()
 		return nil, fmt.Errorf("redis ping error: %w", err)
 	}
 	if pong != "PONG" {
+		rdb.Close()
 		return nil, fmt.Errorf("redis ping failed: unexpected response %s", pong)
 	}
 

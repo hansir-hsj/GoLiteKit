@@ -45,12 +45,10 @@ func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 		filePath = logConf.PanicFileName()
 	}
 
-	// Ensure the parent directory exists before opening the file.
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create panic log directory: %w", err)
 	}
 
-	// Rotate existing file if needed
 	if err := rotateExistingFileIfNeeded(filePath, logConf); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to rotate existing panic log file: %v\n", err)
 	}
@@ -76,7 +74,6 @@ func (l *PanicLogger) caller() string {
 	return strings.Join([]string{file, strconv.Itoa(line)}, ":")
 }
 
-// needRotate checks if rotation is needed.
 func (l *PanicLogger) needRotate() bool {
 	if l.logConf == nil {
 		return false
@@ -105,37 +102,29 @@ func (l *PanicLogger) needRotate() bool {
 	return false
 }
 
-// rotate performs the actual rotation.
-// On partial failure the logger always recovers to a valid open file handle so
-// that subsequent Report() calls do not write to a closed fd.
+// rotate opens a new file first, then renames the old one, then swaps handles.
 func (l *PanicLogger) rotate() error {
 	newFilePath := l.newFilePath(l.lastRotate)
 
-	if err := l.file.Close(); err != nil {
-		// Reopen the original file so logging can continue.
-		if f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
-			l.file = f
-		}
-		return fmt.Errorf("rotate: close failed: %w", err)
-	}
-
-	if err := os.Rename(l.filePath, newFilePath); err != nil {
-		// Rename failed; reopen the original path.
-		if f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); openErr == nil {
-			l.file = f
-		}
-		return fmt.Errorf("rotate: rename failed: %w", err)
-	}
-
-	newTarget, err := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Step 1: Open new file first
+	newTarget, err := os.OpenFile(l.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		// New file could not be created; fall back to the renamed archive file.
-		if f, openErr := os.OpenFile(newFilePath, os.O_APPEND|os.O_WRONLY, 0644); openErr == nil {
-			l.file = f
-		}
 		return fmt.Errorf("rotate: open new file failed: %w", err)
 	}
 
+	// Step 2: Close and rename old file
+	oldTarget := l.file
+	if err := oldTarget.Close(); err != nil {
+		newTarget.Close()
+		return fmt.Errorf("rotate: close failed: %w", err)
+	}
+	if err := os.Rename(l.filePath, newFilePath); err != nil {
+		newTarget.Close()
+		l.file, _ = os.OpenFile(l.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+		return fmt.Errorf("rotate: rename failed: %w", err)
+	}
+
+	// Step 3: Swap handle
 	l.file = newTarget
 	l.lastRotate = time.Now()
 
@@ -144,7 +133,6 @@ func (l *PanicLogger) rotate() error {
 	return nil
 }
 
-// cleanOldFiles removes old rotated panic log files.
 func (l *PanicLogger) cleanOldFiles() {
 	if l.logConf == nil || l.logConf.MaxFileNum <= 0 {
 		return
@@ -153,18 +141,6 @@ func (l *PanicLogger) cleanOldFiles() {
 	cleanOldLogFiles(dir, l.filePath, l.logConf.MaxFileNum)
 }
 
-// rotateIfNeeded checks and performs rotation if needed.
-func (l *PanicLogger) rotateIfNeeded() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	if l.needRotate() {
-		return l.rotate()
-	}
-	return nil
-}
-
-// newFilePath generates new file path based on the given time.
 func (l *PanicLogger) newFilePath(t time.Time) string {
 	if l.logConf == nil {
 		return l.filePath
@@ -190,18 +166,22 @@ func (l *PanicLogger) newFilePath(t time.Time) string {
 	return l.filePath
 }
 
+// Report writes a panic record. Holds a single lock for both rotate check and write
+// to avoid a race window between rotateIfNeeded() and the write.
 func (l *PanicLogger) Report(ctx context.Context, p any) {
-	if err := l.rotateIfNeeded(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to rotate panic log: %v\n", err)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.needRotate() {
+		if err := l.rotate(); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to rotate panic log: %v\n", err)
+		}
 	}
 
 	msg := fmt.Sprintf("[%s] Recover from panic: %v", time.Now().Format("2006-01-02 15:04:05.000"), p)
 	stack := make([]byte, 4096)
 	length := runtime.Stack(stack, false)
 	stack = stack[:length]
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	if _, err := fmt.Fprintf(l.file, "%s\n%s\nStack:\n%s\n\n", msg, l.caller(), stack); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write panic log: %v\n", err)

@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// Test helpers: expose internal deferredResponseWriter state for assertions.
-
 func (d *deferredResponseWriter) Buffer() []byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()

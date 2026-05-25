@@ -103,7 +103,6 @@ func TestRateLimiter_Allow(t *testing.T) {
 		rl := NewRateLimiter(rate.Limit(10), 5)
 		limiter := rl.GetLimiter("user-1")
 
-		// Burst of 5 should be allowed immediately
 		for i := 0; i < 5; i++ {
 			if !limiter.Allow() {
 				t.Errorf("request %d should be allowed", i)
@@ -112,14 +111,12 @@ func TestRateLimiter_Allow(t *testing.T) {
 	})
 
 	t.Run("blocks requests exceeding limit", func(t *testing.T) {
-		rl := NewRateLimiter(rate.Limit(1), 2) // 1 req/sec, burst of 2
+		rl := NewRateLimiter(rate.Limit(1), 2)
 		limiter := rl.GetLimiter("user-1")
 
-		// Use up burst
 		limiter.Allow()
 		limiter.Allow()
 
-		// Next request should be denied
 		if limiter.Allow() {
 			t.Error("request exceeding burst should be blocked")
 		}
@@ -127,15 +124,14 @@ func TestRateLimiter_Allow(t *testing.T) {
 }
 
 func TestRateLimiter_TTL(t *testing.T) {
-	t.Run("removes limiter after TTL", func(t *testing.T) {
+	t.Run("removes limiter after TTL via lazy eviction", func(t *testing.T) {
 		rl := NewRateLimiter(10, 5, WithTTL(50*time.Millisecond))
 
 		_ = rl.GetLimiter("user-1")
 
-		// Limiter should exist
-		rl.mu.Lock()
+		rl.mu.RLock()
 		_, exists := rl.limiters["user-1"]
-		rl.mu.Unlock()
+		rl.mu.RUnlock()
 		if !exists {
 			t.Error("limiter should exist immediately after creation")
 		}
@@ -143,12 +139,14 @@ func TestRateLimiter_TTL(t *testing.T) {
 		// Wait for TTL to expire
 		time.Sleep(100 * time.Millisecond)
 
-		// Limiter should be removed
-		rl.mu.Lock()
+		// Trigger cleanExpired by calling cleanExpired directly
+		rl.cleanExpired()
+
+		rl.mu.RLock()
 		_, exists = rl.limiters["user-1"]
-		rl.mu.Unlock()
+		rl.mu.RUnlock()
 		if exists {
-			t.Error("limiter should be removed after TTL")
+			t.Error("limiter should be removed after TTL expiry and cleanup")
 		}
 	})
 }
@@ -217,12 +215,10 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 		middleware := rl.RateLimiterAsMiddleware(ByIP)
 		wrapped := middleware(inner)
 
-		// Use up the limit.
 		req1 := httptest.NewRequest("GET", "/test", nil)
 		req1.RemoteAddr = "192.168.1.1:12345"
 		wrapped.ServeHTTP(httptest.NewRecorder(), req1.WithContext(WithContext(req1.Context())))
 
-		// Second request should be rate limited.
 		req2 := httptest.NewRequest("GET", "/test", nil)
 		req2.RemoteAddr = "192.168.1.1:12345"
 		rec2 := httptest.NewRecorder()
@@ -267,8 +263,6 @@ func TestByIP(t *testing.T) {
 	req.RemoteAddr = "192.168.1.100:54321"
 
 	key := ByIP(req)
-	// ByIP strips the port so that all connections from the same client share
-	// one rate-limiter bucket regardless of the ephemeral port number.
 	if key != "192.168.1.100" {
 		t.Errorf("key = %s, want 192.168.1.100", key)
 	}

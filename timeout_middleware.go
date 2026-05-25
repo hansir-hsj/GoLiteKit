@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 
 	"github.com/hansir-hsj/GoLiteKit/env"
 )
@@ -29,41 +28,13 @@ func TimeoutMiddleware() Middleware {
 			)
 			defer cancel()
 
-			tw := newTimeoutResponseWriter(w)
+			err := next(timeoutCtx, w, r.WithContext(timeoutCtx))
 
-			type result struct {
-				err   error
-				panic any
+			if timeoutCtx.Err() == context.DeadlineExceeded && err == nil {
+				return ErrTimeout(fmt.Sprintf("Request timeout: %v", context.Cause(timeoutCtx)))
 			}
-			resultChan := make(chan result, 1)
 
-			go func() {
-				defer func() {
-					if p := recover(); p != nil {
-						resultChan <- result{panic: p}
-					}
-				}()
-				err := next(timeoutCtx, tw, r.WithContext(timeoutCtx))
-				resultChan <- result{err: err}
-			}()
-
-			select {
-			case res := <-resultChan:
-				if res.panic != nil {
-					panic(res.panic)
-				}
-				return res.err
-			case <-timeoutCtx.Done():
-				tw.markTimeout()
-				cause := context.Cause(timeoutCtx)
-				// Drain the goroutine in background; re-panic if it panics.
-				go func() {
-					if res := <-resultChan; res.panic != nil {
-						fmt.Fprintf(os.Stderr, "panic in timed-out handler: %v\n", res.panic)
-					}
-				}()
-				return ErrTimeout(fmt.Sprintf("Request timeout: %v", cause))
-			}
+			return err
 		}
 	}
 }

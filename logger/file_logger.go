@@ -19,8 +19,7 @@ type FileLogger struct {
 
 	filePath string
 
-	lines      int64
-	LastRotate time.Time
+	lastRotate time.Time
 
 	logger *slog.Logger
 
@@ -37,7 +36,6 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 
 	filePath := logConf.LogFileName()
 
-	// Rotate existing file if needed before opening
 	if err := rotateExistingFileIfNeeded(filePath, logConf); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to rotate existing log file: %v\n", err)
 	}
@@ -55,11 +53,10 @@ func NewTextLogger(logConf *Config, opts *slog.HandlerOptions) (*FileLogger, err
 		filePath:   filePath,
 		logger:     slog.New(handler),
 		file:       target,
-		LastRotate: time.Now(),
+		lastRotate: time.Now(),
 	}, nil
 }
 
-// rotateExistingFileIfNeeded rotates old log files from previous time periods.
 func rotateExistingFileIfNeeded(filePath string, logConf *Config) error {
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -119,10 +116,9 @@ func rotateExistingFileIfNeeded(filePath string, logConf *Config) error {
 	return os.Rename(filePath, newFilePath)
 }
 
-// needRotate checks if rotation is needed.
 func (l *FileLogger) needRotate() bool {
 	now := time.Now()
-	last := l.LastRotate
+	last := l.lastRotate
 
 	switch l.logConf.RotateRule {
 	case "no":
@@ -144,67 +140,46 @@ func (l *FileLogger) needRotate() bool {
 	return false
 }
 
-// NeedRotate checks if rotation is needed (thread-safe).
 func (l *FileLogger) NeedRotate() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.needRotate()
 }
 
-// rotate performs the actual rotation.
-// If any step fails the logger always ends up with a valid open file handle
-// so that subsequent log calls do not write to a closed fd.
+// rotate opens a new file first, then renames the old one, then swaps handles.
+// This ensures l.file is always valid even if rename fails.
 func (l *FileLogger) rotate() error {
-	newFilePath := l.newFilePath(l.LastRotate)
+	newFilePath := l.newFilePath(l.lastRotate)
 
-	if err := l.file.Close(); err != nil {
-		// Could not close the current file. Reopen it so the handle stays valid.
-		f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if openErr == nil {
-			l.file = f
-			handler := newContextHandler(f, l.logConf.Format, l.opts)
-			l.logger = slog.New(handler)
-		}
-		return fmt.Errorf("rotate: close failed: %w", err)
-	}
-
-	if err := os.Rename(l.filePath, newFilePath); err != nil {
-		// Rename failed; reopen the original file so we can keep logging.
-		f, openErr := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if openErr == nil {
-			l.file = f
-			handler := newContextHandler(f, l.logConf.Format, l.opts)
-			l.logger = slog.New(handler)
-		}
-		return fmt.Errorf("rotate: rename failed: %w", err)
-	}
-
-	newTarget, err := os.OpenFile(l.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	// Step 1: Open new file first
+	newTarget, err := os.OpenFile(l.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		// New file could not be created; try to reopen the renamed file to
-		// preserve any ability to log rather than crash.
-		f, openErr := os.OpenFile(newFilePath, os.O_APPEND|os.O_WRONLY, 0644)
-		if openErr == nil {
-			l.file = f
-			handler := newContextHandler(f, l.logConf.Format, l.opts)
-			l.logger = slog.New(handler)
-		}
 		return fmt.Errorf("rotate: open new file failed: %w", err)
 	}
 
+	// Step 2: Close and rename old file
+	oldTarget := l.file
+	if err := oldTarget.Close(); err != nil {
+		newTarget.Close()
+		return fmt.Errorf("rotate: close failed: %w", err)
+	}
+	if err := os.Rename(l.filePath, newFilePath); err != nil {
+		newTarget.Close()
+		l.file, _ = os.OpenFile(l.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+		return fmt.Errorf("rotate: rename failed: %w", err)
+	}
+
+	// Step 3: Swap handle
 	l.file = newTarget
 	handler := newContextHandler(newTarget, l.logConf.Format, l.opts)
 	l.logger = slog.New(handler)
-
-	l.lines = 0
-	l.LastRotate = time.Now()
+	l.lastRotate = time.Now()
 
 	go l.cleanOldFiles()
 
 	return nil
 }
 
-// cleanOldFiles removes old rotated log files.
 func (l *FileLogger) cleanOldFiles() {
 	if l.logConf.MaxFileNum <= 0 {
 		return
@@ -212,7 +187,6 @@ func (l *FileLogger) cleanOldFiles() {
 	cleanOldLogFiles(l.logConf.Dir, l.filePath, l.logConf.MaxFileNum)
 }
 
-// cleanOldLogFiles removes old rotated log files exceeding maxFileNum.
 func cleanOldLogFiles(dir string, filePath string, maxFileNum int) {
 	if maxFileNum <= 0 {
 		return
@@ -255,7 +229,6 @@ func cleanOldLogFiles(dir string, filePath string, maxFileNum int) {
 	}
 }
 
-// isDigits checks if a string contains only digits.
 func isDigits(s string) bool {
 	for _, c := range s {
 		if c < '0' || c > '9' {
@@ -265,9 +238,6 @@ func isDigits(s string) bool {
 	return true
 }
 
-// sortFilesByModTime sorts files by modification time (oldest first).
-// It pre-fetches all Info() results in a single pass to avoid the O(n²)
-// syscall cost of calling Info() inside a nested comparison loop.
 func sortFilesByModTime(dir string, files []os.DirEntry) {
 	type entryWithTime struct {
 		entry   os.DirEntry
@@ -300,14 +270,12 @@ func sortFilesByModTime(dir string, files []os.DirEntry) {
 	}
 }
 
-// Rotate performs rotation (thread-safe).
 func (l *FileLogger) Rotate() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.rotate()
 }
 
-// rotateIfNeeded checks and performs rotation if needed.
 func (l *FileLogger) rotateIfNeeded() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -318,7 +286,6 @@ func (l *FileLogger) rotateIfNeeded() error {
 	return nil
 }
 
-// newFilePath generates new file path based on the given time.
 func (l *FileLogger) newFilePath(t time.Time) string {
 	switch l.logConf.RotateRule {
 	case "no":
@@ -340,11 +307,10 @@ func (l *FileLogger) newFilePath(t time.Time) string {
 	return l.filePath
 }
 
-// NewFilePath generates new file path for Rotator interface.
 func (l *FileLogger) NewFilePath() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.newFilePath(l.LastRotate)
+	return l.newFilePath(l.lastRotate)
 }
 
 func (l *FileLogger) Debug(ctx context.Context, msg string, args ...any) {
@@ -381,7 +347,7 @@ func (l *FileLogger) Close() error {
 }
 
 func (l *FileLogger) logit(ctx context.Context, level slog.Level, format string, args ...any) {
-	l.log(ctx, slog.Level(level), format, args...)
+	l.log(ctx, level, format, args...)
 }
 
 func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args ...any) {
@@ -400,9 +366,5 @@ func (l *FileLogger) log(ctx context.Context, level slog.Level, msg string, args
 
 	if err := logRecord(ctx, l.logger.Handler(), level, msg, 5, args...); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to log message: %v\n", err)
-		return
 	}
-
-	// l.mu is already held exclusively here; a plain increment is sufficient.
-	l.lines++
 }
