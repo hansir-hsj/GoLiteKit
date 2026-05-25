@@ -41,8 +41,6 @@ type Config struct {
 	DbConfig  `toml:"db"`
 	DbTimeout `toml:"Timeout"`
 	DbConn    `toml:"Conn"`
-
-	gorm.Config
 }
 
 func parse(conf string) (*Config, error) {
@@ -52,6 +50,10 @@ func parse(conf string) (*Config, error) {
 	}
 
 	if dbConfig.DSN == "" {
+		protocol := dbConfig.Protocol
+		if protocol == "" {
+			protocol = "tcp"
+		}
 		// Only include charset when explicitly configured; an empty value causes
 		// "unknown charset" errors on some MySQL server versions.
 		params := map[string]string{}
@@ -62,7 +64,7 @@ func parse(conf string) (*Config, error) {
 		mysqlConfig := mysql.Config{
 			User:                 dbConfig.Username,
 			Passwd:               dbConfig.Password,
-			Net:                  dbConfig.Protocol,
+			Net:                  protocol,
 			Addr:                 fmt.Sprintf("%s:%d", dbConfig.Host, dbConfig.Port),
 			DBName:               dbConfig.Database,
 			Timeout:              time.Duration(dbConfig.Timeout) * time.Millisecond,
@@ -91,7 +93,7 @@ func NewFromConfig(conf ...string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to parse db config: %w", err)
 	}
 
-	db, err := gorm.Open(mysqlDriver.Open(cfg.DSN), cfg)
+	db, err := gorm.Open(mysqlDriver.Open(cfg.DSN), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
@@ -108,10 +110,11 @@ func NewFromConfig(conf ...string) (*gorm.DB, error) {
 		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	}
 	if cfg.ConnMaxLifeTime > 0 {
-		sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifeTime) * time.Second)
+		sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifeTime) * time.Millisecond)
 	}
 
 	if err := sqlDB.Ping(); err != nil {
+		sqlDB.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 

@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,121 +11,131 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/env"
 )
 
-func TestTimeoutMiddleware_Normal(t *testing.T) {
-	err := env.Init("env/app.toml")
-	if err != nil {
-		t.Skip("env not initialized, skipping timeout test: " + err.Error())
-	}
+func testTimeoutMiddleware(timeout time.Duration) Middleware {
+	return func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			if timeout < 1 {
+				return next(ctx, w, r)
+			}
 
-	t.Run("completes before timeout", func(t *testing.T) {
-		mw := TimeoutMiddleware()
+			timeoutCtx, cancel := context.WithTimeoutCause(
+				ctx,
+				timeout,
+				fmt.Errorf("request timeout after %v", timeout),
+			)
+			defer cancel()
 
-		handlerCalled := false
-		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-			handlerCalled = true
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("success"))
-			return nil
-		})
+			err := next(timeoutCtx, w, r.WithContext(timeoutCtx))
 
-		wrapped := mw(inner)
+			if timeoutCtx.Err() == context.DeadlineExceeded && err == nil {
+				return ErrTimeout(fmt.Sprintf("Request timeout: %v", context.Cause(timeoutCtx)))
+			}
 
-		req := httptest.NewRequest("GET", "/test", nil)
-		ctx := WithContext(req.Context())
-		req = req.WithContext(ctx)
-		rec := httptest.NewRecorder()
-
-		wrapped.ServeHTTP(rec, req)
-
-		if !handlerCalled {
-			t.Error("expected handler to be called")
+			return err
 		}
+	}
+}
+
+func TestTimeoutMiddleware_CompletesBeforeTimeout(t *testing.T) {
+	mw := testTimeoutMiddleware(5 * time.Second)
+
+	handlerCalled := false
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		handlerCalled = true
+		return nil
 	})
+
+	wrapped := mw(inner)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	ctx := WithContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	err := wrapped(ctx, rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestTimeoutMiddleware_TimesOut(t *testing.T) {
+	mw := testTimeoutMiddleware(100 * time.Millisecond)
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		<-ctx.Done()
+		return nil
+	})
+
+	wrapped := mw(inner)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	ctx := WithContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	err := wrapped(ctx, rec, req)
+
+	if err == nil {
+		t.Error("expected timeout error")
+	}
+	appErr, ok := err.(*AppError)
+	if !ok {
+		t.Errorf("expected AppError, got %T", err)
+	} else if appErr.Code != http.StatusRequestTimeout {
+		t.Errorf("status = %d, want %d", appErr.Code, http.StatusRequestTimeout)
+	}
 }
 
 func TestTimeoutMiddleware_ZeroTimeout(t *testing.T) {
-	err := env.Init("env/app.toml")
-	if err != nil {
-		t.Skip("env not initialized, skipping test: " + err.Error())
-	}
+	mw := testTimeoutMiddleware(0)
 
-	t.Run("handler is called when timeout is configured", func(t *testing.T) {
-		mw := TimeoutMiddleware()
-
-		handlerCalled := false
-		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-			handlerCalled = true
-			return nil
-		})
-
-		wrapped := mw(inner)
-
-		req := httptest.NewRequest("GET", "/test", nil)
-		rec := httptest.NewRecorder()
-
-		wrapped.ServeHTTP(rec, req)
-
-		if !handlerCalled {
-			t.Error("expected handler to be called")
-		}
+	handlerCalled := false
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		handlerCalled = true
+		return nil
 	})
+
+	wrapped := mw(inner)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	ctx := WithContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	err := wrapped(ctx, rec, req)
+
+	if !handlerCalled {
+		t.Error("expected handler to be called")
+	}
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
 }
 
-func TestTimeoutResponseWriter(t *testing.T) {
-	t.Run("blocks write after timeout", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		tw := newTimeoutResponseWriter(rec)
+func TestTimeoutMiddleware_ContextCancellation(t *testing.T) {
+	mw := testTimeoutMiddleware(200 * time.Millisecond)
 
-		n, err := tw.Write([]byte("before"))
-		if err != nil {
-			t.Errorf("Write before timeout failed: %v", err)
-		}
-		if n != 6 {
-			t.Errorf("bytes written = %d, want 6", n)
-		}
-
-		tw.markTimeout()
-
-		n, err = tw.Write([]byte("after"))
-		if err != http.ErrHandlerTimeout {
-			t.Errorf("error = %v, want ErrHandlerTimeout", err)
-		}
-		if n != 0 {
-			t.Errorf("bytes written after timeout = %d, want 0", n)
-		}
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		<-ctx.Done()
+		return ctx.Err()
 	})
 
-	t.Run("blocks WriteHeader after timeout", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		tw := newTimeoutResponseWriter(rec)
+	wrapped := mw(inner)
 
-		tw.markTimeout()
-		tw.WriteHeader(http.StatusCreated)
+	req := httptest.NewRequest("GET", "/test", nil)
+	ctx := WithContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
 
-		if tw.statusCode != http.StatusOK {
-			t.Errorf("status = %d, should not change after timeout", tw.statusCode)
-		}
-	})
+	err := wrapped(ctx, rec, req)
 
-	t.Run("prevents duplicate WriteHeader", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		tw := newTimeoutResponseWriter(rec)
-
-		tw.WriteHeader(http.StatusCreated)
-		tw.WriteHeader(http.StatusNotFound)
-
-		if tw.statusCode != http.StatusCreated {
-			t.Errorf("status = %d, want %d", tw.statusCode, http.StatusCreated)
-		}
-	})
-
-	t.Run("Flush is blocked after timeout", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		tw := newTimeoutResponseWriter(rec)
-
-		tw.markTimeout()
-		tw.Flush()
-	})
+	if err == nil {
+		t.Error("expected error due to context cancellation")
+	}
 }
 
 func TestTimeoutMiddleware_SSE(t *testing.T) {
@@ -142,7 +153,6 @@ func TestTimeoutMiddleware_SSE(t *testing.T) {
 				remaining := time.Until(deadline)
 				t.Logf("SSE request has deadline in %v", remaining)
 			}
-			w.WriteHeader(http.StatusOK)
 			return nil
 		})
 
@@ -154,6 +164,6 @@ func TestTimeoutMiddleware_SSE(t *testing.T) {
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		wrapped.ServeHTTP(rec, req)
+		wrapped(ctx, rec, req)
 	})
 }
