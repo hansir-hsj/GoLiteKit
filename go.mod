@@ -11,8 +11,8 @@ require (
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/time v0.12.0
 	gopkg.in/yaml.v2 v2.4.0
-	gorm.io/driver/mysql v1.5.7
-	gorm.io/gorm v1.25.12
+	gorm.io/driver/mysql v1.6.0
+	gorm.io/gorm v1.30.0
 )
 
 require (
