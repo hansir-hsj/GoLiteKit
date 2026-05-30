@@ -54,7 +54,6 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 - Embed `Tracker` in `glkContext` (no heap allocation on `WithTracker`) — **-2 allocs/op**.
 
 ### Added
-- `benchmarks/` — comparative suite vs Gin / Echo / Chi / Stdlib across 5 scenarios.
 - `docs/` — performance optimization notes.
 
 ### Removed

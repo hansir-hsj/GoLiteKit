@@ -10,9 +10,9 @@
 
 ## 性能
 
-JSON 绑定场景下，GoLiteKit 与 Gin 的性能差距在 **4% 以内**。
-纯路由开销约高 25%，代价来自 pooled context、响应缓冲和结构化日志——
-这些是普通路由库所不具备的能力。完整数据：[`benchmarks/`](benchmarks/)
+性能基准测试仍在规划中。在加入可复现的 benchmark 套件之前，建议结合你自己的业务负载和部署环境评估 GoLiteKit。
+
+未来的性能报告应包含 benchmark 代码、运行命令、机器环境、对比版本和 `benchstat` 输出。
 
 ## 特性
 
