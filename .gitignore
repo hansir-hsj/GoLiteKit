@@ -1,0 +1,3 @@
+# Logger test/runtime output
+logger/logs/*.log
+logger/logs/*.log.*
