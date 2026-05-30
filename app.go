@@ -100,11 +100,7 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 	)
 
 	if env.EnablePprof() {
-		router.mux.HandleFunc("/debug/pprof/", http.DefaultServeMux.ServeHTTP)
-		router.mux.HandleFunc("/debug/pprof/cmdline", http.DefaultServeMux.ServeHTTP)
-		router.mux.HandleFunc("/debug/pprof/profile", http.DefaultServeMux.ServeHTTP)
-		router.mux.HandleFunc("/debug/pprof/symbol", http.DefaultServeMux.ServeHTTP)
-		router.mux.HandleFunc("/debug/pprof/trace", http.DefaultServeMux.ServeHTTP)
+		router.MountPprof(PprofOptions{LoopbackOnly: true})
 	}
 
 	if staticDir := env.StaticDir(); staticDir != "" {
