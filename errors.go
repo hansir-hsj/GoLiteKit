@@ -114,6 +114,7 @@ func NewAppError(code int, msg string, internal error) *AppError {
 
 // WrapError returns err as *AppError with the given status code.
 // If err is already *AppError it is returned unchanged.
+// For 5xx status codes, the error message is not exposed to the client.
 func WrapError(err error, code int) *AppError {
 	if err == nil {
 		return nil
@@ -121,5 +122,9 @@ func WrapError(err error, code int) *AppError {
 	if appErr, ok := err.(*AppError); ok {
 		return appErr
 	}
-	return &AppError{Code: code, Message: err.Error(), Internal: err}
+	msg := err.Error()
+	if code >= 500 {
+		msg = http.StatusText(code)
+	}
+	return &AppError{Code: code, Message: msg, Internal: err}
 }
