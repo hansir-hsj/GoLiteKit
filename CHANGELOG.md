@@ -10,6 +10,26 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v1.1.0] - 2026-05-30
+
+### Added
+- **HandlerFunc routes**: lightweight `func(*Context) error` handlers as an alternative to controllers.
+- **Generic service registry**: `Services.Set(key, value)` / `Services.Get(key)` for custom dependencies beyond DB/Redis.
+- **Context-aware server lifecycle**: `Start()` (non-blocking), `ListenAndServe(ctx)` (blocks until context cancelled, then graceful shutdown).
+- **Protected pprof mounting**: `MountPprof()` with optional `LoopbackOnly` restriction.
+- **Safe body logging**: request/response body logging with configurable `MaxBodyBytes` truncation and sensitive field redaction.
+- **CI**: dependency and vulnerability checks via GitHub Actions.
+
+### Changed
+- **Middleware options injection**: middleware constructors now accept explicit option structs instead of reading from global config.
+- Internal error responses no longer expose implementation details to clients (5xx errors return generic message).
+
+### Fixed
+- `glk new` project creation hardened against edge cases (empty names, invalid paths).
+- Critical bug fixes for timeout middleware, rate limiter token refill, logger rotation, and DB/Redis connection handling.
+
+---
+
 ## [v0.3.0] - 2026-04-11
 
 ### Changed

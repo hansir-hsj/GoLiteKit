@@ -3,7 +3,7 @@
 [English](readme.md) | [中文](readme.zh.md)
 
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
-[![Version](https://img.shields.io/badge/version-v0.3.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.1.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 轻量级 Go Web 框架，基于 `net/http`，专注简洁和清晰。
@@ -16,13 +16,16 @@
 
 ## 特性
 
-- **泛型控制器** — 通过 `BaseController[T]` 实现类型安全的请求绑定
+- **泛型控制器** — 通过 `BaseControllerOf[T]` 实现类型安全的请求绑定
+- **HandlerFunc 路由** — 轻量级 `func(*Context) error` 处理器，无需控制器样板代码
 - **中间件链** — 可组合、有序的中间件，支持路由组级别配置
 - **请求绑定** — 开箱即用支持 JSON、form-urlencoded、multipart
 - **SSE 支持** — 流式响应，自动 flush
 - **内置中间件** — 日志、错误处理、超时、限流、gzip 压缩、请求追踪
-- **结构化日志** — 基于 `slog`，支持按请求累积字段、日志轮转
-- **依赖注入** — DB (gorm)、Redis、Logger 通过 functional options 注入
+- **结构化日志** — 基于 `slog`，支持请求体日志（截断和脱敏）、日志轮转
+- **服务注册表** — DB、Redis、Logger 通过 functional options 注入 + 通用 `Set/Get` 支持自定义服务
+- **优雅生命周期** — `Start`、`ListenAndServe`（上下文感知）、`Shutdown` 可配置超时
+- **Pprof 挂载** — 受保护的 pprof 端点，可选仅限本地回环访问
 - **glk 脚手架** — 使用 `glk new` 快速创建项目
 
 ## 安装
@@ -189,6 +192,66 @@ func (c *MyController) Serve(ctx context.Context) error {
     // ...
     return nil
 }
+```
+
+## HandlerFunc 路由
+
+对于不需要完整控制器的简单端点：
+
+```go
+app.GET("/ping", glk.HandlerFunc(func(ctx *glk.Context) error {
+    return ctx.ServeJSON(map[string]string{"status": "ok"})
+}))
+```
+
+## 服务注册表
+
+注册和获取 DB/Redis 之外的自定义服务：
+
+```go
+app := glk.NewApp(
+    glk.WithDB(db),
+    glk.WithService("cache", myCache),
+)
+
+// 在控制器中使用
+func (c *MyController) Serve(ctx context.Context) error {
+    cache := c.Services().Get("cache").(MyCache)
+    // ...
+    return nil
+}
+```
+
+## 优雅关闭
+
+使用 `ListenAndServe` 实现上下文感知的生命周期管理，自动优雅关闭：
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+defer stop()
+
+app := glk.NewApp()
+app.GET("/hello", &HelloController{})
+app.ListenAndServe(ctx) // 阻塞直到收到信号，然后优雅关闭
+```
+
+或使用 `Start` + `Shutdown` 手动控制：
+
+```go
+app.Start()
+// ... 做其他事情 ...
+app.Shutdown(ctx)
+```
+
+## Pprof
+
+挂载受保护的 pprof 端点：
+
+```go
+app.MountPprof(glk.PprofOptions{
+    LoopbackOnly: true, // 仅允许 127.0.0.1/::1 访问
+})
+// 访问地址: /debug/pprof/
 ```
 
 ## 配置文件

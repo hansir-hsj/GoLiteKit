@@ -3,7 +3,7 @@
 [English](readme.md) | [中文](readme.zh.md)
 
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
-[![Version](https://img.shields.io/badge/version-v0.3.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.1.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 A lightweight Go web framework built on `net/http`, designed for simplicity and clarity.
@@ -16,13 +16,16 @@ Future benchmark reports should include the benchmark code, command, machine pro
 
 ## Features
 
-- **Generic controllers** — type-safe request binding via `BaseController[T]`
+- **Generic controllers** — type-safe request binding via `BaseControllerOf[T]`
+- **HandlerFunc routes** — lightweight `func(*Context) error` handlers without controller boilerplate
 - **Middleware chain** — composable, ordered middleware with per-group support
 - **Request binding** — JSON, form-urlencoded, multipart out of the box
 - **SSE support** — streaming responses with proper flushing
 - **Built-in middleware** — logger, error handler, timeout, rate limiter, gzip, tracker
-- **Structured logging** — based on `slog`, with per-request field accumulation and log rotation
-- **Service injection** — DB (gorm), Redis, Logger wired in via functional options
+- **Structured logging** — based on `slog`, with body logging (truncation & redaction), log rotation
+- **Service registry** — DB, Redis, Logger via functional options + generic `Set/Get` for custom services
+- **Graceful lifecycle** — `Start`, `ListenAndServe` (context-aware), `Shutdown` with configurable timeout
+- **Pprof mounting** — protected pprof endpoints with optional loopback-only restriction
 - **glk CLI** — scaffold new projects with `glk new`
 
 ## Installation
@@ -190,6 +193,66 @@ func (c *MyController) Serve(ctx context.Context) error {
     // ...
     return nil
 }
+```
+
+## HandlerFunc Routes
+
+For simple endpoints that don't need a full controller:
+
+```go
+app.GET("/ping", glk.HandlerFunc(func(ctx *glk.Context) error {
+    return ctx.ServeJSON(map[string]string{"status": "ok"})
+}))
+```
+
+## Service Registry
+
+Register and retrieve custom services beyond DB/Redis:
+
+```go
+app := glk.NewApp(
+    glk.WithDB(db),
+    glk.WithService("cache", myCache),
+)
+
+// In controller
+func (c *MyController) Serve(ctx context.Context) error {
+    cache := c.Services().Get("cache").(MyCache)
+    // ...
+    return nil
+}
+```
+
+## Graceful Shutdown
+
+Use `ListenAndServe` for context-aware lifecycle with automatic graceful shutdown:
+
+```go
+ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+defer stop()
+
+app := glk.NewApp()
+app.GET("/hello", &HelloController{})
+app.ListenAndServe(ctx) // blocks until signal, then graceful shutdown
+```
+
+Or use `Start` + `Shutdown` for manual control:
+
+```go
+app.Start()
+// ... do other work ...
+app.Shutdown(ctx)
+```
+
+## Pprof
+
+Mount protected pprof endpoints:
+
+```go
+app.MountPprof(glk.PprofOptions{
+    LoopbackOnly: true, // only accessible from 127.0.0.1/::1
+})
+// Available at /debug/pprof/
 ```
 
 ## Configuration
