@@ -176,4 +176,3 @@ func TestOptionalInternalError(t *testing.T) {
 		t.Error("Internal should be set when provided")
 	}
 }
-

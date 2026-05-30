@@ -226,12 +226,12 @@ func TestCleanOldLogFiles_IgnoresNonMatchingFiles(t *testing.T) {
 
 	// Create files that should NOT be matched/deleted
 	nonMatchingFiles := []string{
-		"other.log",           // different base name
-		"app.log.backup",      // non-timestamp suffix
-		"app.log.txt",         // non-timestamp suffix
-		"app.log.2026abc",     // partial timestamp
-		"app.log.",            // empty suffix
-		"README.md",           // completely different
+		"other.log",       // different base name
+		"app.log.backup",  // non-timestamp suffix
+		"app.log.txt",     // non-timestamp suffix
+		"app.log.2026abc", // partial timestamp
+		"app.log.",        // empty suffix
+		"README.md",       // completely different
 	}
 
 	for _, name := range nonMatchingFiles {
