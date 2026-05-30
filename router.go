@@ -3,10 +3,40 @@ package golitekit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 	"sync"
 )
+
+// HandlerFunc is a lightweight handler that receives the request Context directly.
+type HandlerFunc func(ctx *Context) error
+
+// handlerFuncController adapts a HandlerFunc to the Controller interface.
+type handlerFuncController struct {
+	BaseController
+	fn HandlerFunc
+}
+
+func (c *handlerFuncController) Serve(ctx context.Context) error {
+	gcx := GetContext(ctx)
+	return c.fn(gcx)
+}
+
+// toController converts the handler argument to a Controller.
+// Accepts: Controller, HandlerFunc, or func(*Context) error.
+func toController(c any) Controller {
+	switch h := c.(type) {
+	case Controller:
+		return h
+	case HandlerFunc:
+		return &handlerFuncController{fn: h}
+	case func(*Context) error:
+		return &handlerFuncController{fn: HandlerFunc(h)}
+	default:
+		panic(fmt.Sprintf("golitekit: unsupported handler type %T", c))
+	}
+}
 
 // Router handles route registration and middleware.
 type Router struct {
@@ -32,24 +62,25 @@ func (r *Router) Use(middlewares ...Middleware) *Router {
 	return r
 }
 
-func (r *Router) GET(path string, c Controller)     { r.handle(http.MethodGet, path, c, nil) }
-func (r *Router) POST(path string, c Controller)    { r.handle(http.MethodPost, path, c, nil) }
-func (r *Router) PUT(path string, c Controller)     { r.handle(http.MethodPut, path, c, nil) }
-func (r *Router) DELETE(path string, c Controller)  { r.handle(http.MethodDelete, path, c, nil) }
-func (r *Router) PATCH(path string, c Controller)   { r.handle(http.MethodPatch, path, c, nil) }
-func (r *Router) HEAD(path string, c Controller)    { r.handle(http.MethodHead, path, c, nil) }
-func (r *Router) OPTIONS(path string, c Controller) { r.handle(http.MethodOptions, path, c, nil) }
+func (r *Router) GET(path string, c any)     { r.handle(http.MethodGet, path, c, nil) }
+func (r *Router) POST(path string, c any)    { r.handle(http.MethodPost, path, c, nil) }
+func (r *Router) PUT(path string, c any)     { r.handle(http.MethodPut, path, c, nil) }
+func (r *Router) DELETE(path string, c any)   { r.handle(http.MethodDelete, path, c, nil) }
+func (r *Router) PATCH(path string, c any)    { r.handle(http.MethodPatch, path, c, nil) }
+func (r *Router) HEAD(path string, c any)     { r.handle(http.MethodHead, path, c, nil) }
+func (r *Router) OPTIONS(path string, c any)  { r.handle(http.MethodOptions, path, c, nil) }
 
 // Any registers all common HTTP methods.
-func (r *Router) Any(path string, c Controller) {
+func (r *Router) Any(path string, c any) {
 	r.GET(path, c)
 	r.POST(path, c)
 	r.PUT(path, c)
 	r.DELETE(path, c)
 }
 
-func (r *Router) handle(method, path string, c Controller, groupMiddlewares MiddlewareQueue) {
-	handler := r.wrapController(c, groupMiddlewares)
+func (r *Router) handle(method, path string, c any, groupMiddlewares MiddlewareQueue) {
+	ctrl := toController(c)
+	handler := r.wrapController(ctrl, groupMiddlewares)
 
 	// Register the method-specific handler directly (Go 1.22+ pattern syntax).
 	r.mux.Handle(method+" "+path, handler)
@@ -70,8 +101,13 @@ func (r *Router) handle(method, path string, c Controller, groupMiddlewares Midd
 func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) http.Handler {
 	// Extract the concrete type once at registration time.
 	t := reflect.TypeOf(c).Elem()
+	prototype := reflect.ValueOf(c).Elem()
 	ctrlPool := &sync.Pool{
-		New: func() any { return reflect.New(t).Interface() },
+		New: func() any {
+			v := reflect.New(t)
+			v.Elem().Set(prototype)
+			return v.Interface()
+		},
 	}
 
 	// innerHandler is stable: built once at registration, not recreated per request.
