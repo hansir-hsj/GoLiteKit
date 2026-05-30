@@ -176,3 +176,29 @@ func TestOptionalInternalError(t *testing.T) {
 		t.Error("Internal should be set when provided")
 	}
 }
+
+func TestInternalErrorDoesNotExposeCause(t *testing.T) {
+	// WrapError with 500 should not expose the internal error message
+	rawErr := errors.New("database password leaked in error")
+	appErr := WrapError(rawErr, http.StatusInternalServerError)
+
+	if appErr.Message == rawErr.Error() {
+		t.Fatalf("internal cause leaked in message: %s", appErr.Message)
+	}
+	if appErr.Message != "Internal Server Error" {
+		t.Fatalf("message = %q, want 'Internal Server Error'", appErr.Message)
+	}
+	// Internal should still be preserved for logging
+	if appErr.Internal != rawErr {
+		t.Fatal("internal error should be preserved for logging")
+	}
+}
+
+func TestWrapError_4xxExposesMessage(t *testing.T) {
+	rawErr := errors.New("validation: name is required")
+	appErr := WrapError(rawErr, http.StatusBadRequest)
+
+	if appErr.Message != rawErr.Error() {
+		t.Fatalf("4xx message = %q, want %q", appErr.Message, rawErr.Error())
+	}
+}
