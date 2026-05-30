@@ -292,3 +292,32 @@ func containsHelper(s, substr string) bool {
 	}
 	return false
 }
+
+func TestContextServiceStore(t *testing.T) {
+	type fakeService struct{ Name string }
+
+	svc := &Services{}
+	r := newTestRouter()
+	r.services = svc
+
+	r.GET("/svc", func(ctx *Context) error {
+		ctx.SetService("fake", &fakeService{Name: "primary"})
+		got, ok := ctx.Service("fake").(*fakeService)
+		if !ok {
+			return ErrInternal("service type mismatch", nil)
+		}
+		if got.Name != "primary" {
+			return ErrInternal("service name mismatch", nil)
+		}
+		ctx.ServeJSON(map[string]string{"ok": "true"})
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/svc", nil)
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}

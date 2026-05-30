@@ -243,6 +243,21 @@ func (ctx *Context) Redis() *redis.Client {
 	return ctx.services.Redis()
 }
 
+// SetService stores a named service in the app-level registry.
+func (ctx *Context) SetService(key string, value any) {
+	if ctx.services != nil {
+		ctx.services.Set(key, value)
+	}
+}
+
+// Service retrieves a named service from the app-level registry.
+func (ctx *Context) Service(key string) any {
+	if ctx.services == nil {
+		return nil
+	}
+	return ctx.services.Get(key)
+}
+
 func (ctx *Context) ServeRawData(data any) {
 	ctx.rawResponse = data
 }

@@ -1,6 +1,8 @@
 package golitekit
 
 import (
+	"sync"
+
 	"github.com/hansir-hsj/GoLiteKit/logger"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -12,6 +14,9 @@ type Services struct {
 	redis       *redis.Client
 	logger      logger.Logger
 	panicLogger *logger.PanicLogger
+
+	mu       sync.RWMutex
+	registry map[string]any
 }
 
 type ServiceOption func(*Services)
@@ -30,6 +35,11 @@ func WithLogger(l logger.Logger) ServiceOption {
 
 func WithPanicLogger(pl *logger.PanicLogger) ServiceOption {
 	return func(s *Services) { s.panicLogger = pl }
+}
+
+// WithService registers a named service in the generic registry.
+func WithService(key string, value any) ServiceOption {
+	return func(s *Services) { s.Set(key, value) }
 }
 
 func (s *Services) DB() *gorm.DB {
@@ -58,4 +68,24 @@ func (s *Services) PanicLogger() *logger.PanicLogger {
 		return nil
 	}
 	return s.panicLogger
+}
+
+// Set stores a named service.
+func (s *Services) Set(key string, value any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.registry == nil {
+		s.registry = make(map[string]any)
+	}
+	s.registry[key] = value
+}
+
+// Get retrieves a named service.
+func (s *Services) Get(key string) any {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.registry == nil {
+		return nil
+	}
+	return s.registry[key]
 }
