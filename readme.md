@@ -2,8 +2,8 @@
 
 [English](readme.md) | [中文](readme.zh.md)
 
-[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
-[![Version](https://img.shields.io/badge/version-v0.2.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
+[![Version](https://img.shields.io/badge/version-v0.3.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 A lightweight Go web framework built on `net/http`, designed for simplicity and clarity.
@@ -31,7 +31,7 @@ features that plain routers omit. Full results: [`benchmarks/`](benchmarks/)
 go get github.com/hansir-hsj/GoLiteKit
 ```
 
-Requires Go 1.22+.
+Requires Go 1.23+.
 
 ## Quick Start
 
