@@ -211,3 +211,40 @@ func TestRouter_Use_MiddlewareExecutes(t *testing.T) {
 		t.Error("expected global middleware to execute")
 	}
 }
+
+func TestHandlerFuncRouteWritesJSON(t *testing.T) {
+	r := newTestRouter()
+	r.GET("/hello", func(ctx *Context) error {
+		ctx.ServeJSON(map[string]string{"message": "hello"})
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/hello", nil)
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "hello") {
+		t.Fatalf("body = %q, want hello", rec.Body.String())
+	}
+}
+
+func TestHandlerFuncRouteReturnsAppError(t *testing.T) {
+	r := newTestRouter()
+	r.GET("/bad", func(ctx *Context) error {
+		return ErrBadRequest("invalid request", nil)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/bad", nil)
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid request") {
+		t.Fatalf("body = %q, want invalid request", rec.Body.String())
+	}
+}
