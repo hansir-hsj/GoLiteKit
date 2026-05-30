@@ -44,6 +44,7 @@ type Server struct {
 	config     ServerConfig
 	httpServer *http.Server
 	listener   net.Listener
+	handler    http.Handler
 }
 
 // NewServer creates a new Server.
@@ -58,6 +59,53 @@ func NewServer(config ServerConfig) *Server {
 		config.ShutdownTimeout = 10 * time.Second
 	}
 	return &Server{config: config}
+}
+
+// Start begins listening and serving without signal handling.
+// Returns immediately after the listener is ready.
+// Use Shutdown to stop the server.
+func (s *Server) Start(handler http.Handler) error {
+	s.handler = handler
+	s.httpServer = &http.Server{
+		Handler:           handler,
+		ReadTimeout:       s.config.ReadTimeout,
+		WriteTimeout:      s.config.WriteTimeout,
+		IdleTimeout:       s.config.IdleTimeout,
+		ReadHeaderTimeout: s.config.ReadHeaderTimeout,
+		MaxHeaderBytes:    s.config.MaxHeaderBytes,
+	}
+
+	ln, err := net.Listen(s.config.Network, s.config.Addr)
+	if err != nil {
+		return fmt.Errorf("listen error: %w", err)
+	}
+
+	if s.config.TLSCertFile != "" && s.config.TLSKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(s.config.TLSCertFile, s.config.TLSKeyFile)
+		if err != nil {
+			ln.Close()
+			return fmt.Errorf("load tls cert error: %w", err)
+		}
+		ln = tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}})
+	}
+
+	s.listener = ln
+	go s.httpServer.Serve(ln)
+	return nil
+}
+
+// ListenAndServe starts the server and blocks until ctx is cancelled,
+// then performs graceful shutdown within ShutdownTimeout.
+func (s *Server) ListenAndServe(ctx context.Context, handler http.Handler) error {
+	if err := s.Start(handler); err != nil {
+		return err
+	}
+
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
+	defer cancel()
+	return s.httpServer.Shutdown(shutdownCtx)
 }
 
 // Run starts the server (blocking).
