@@ -1,8 +1,9 @@
 // sse demonstrates Server-Sent Events (SSE) streaming in GoLiteKit.
 //
 // Routes:
-//   GET /events      streams 5 events, one per second
-//   GET /chat        streams named events (join, message, leave)
+//
+//	GET /events      streams 5 events, one per second
+//	GET /chat        streams named events (join, message, leave)
 package main
 
 import (
