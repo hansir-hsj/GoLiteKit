@@ -248,3 +248,26 @@ func TestHandlerFuncRouteReturnsAppError(t *testing.T) {
 		t.Fatalf("body = %q, want invalid request", rec.Body.String())
 	}
 }
+
+type prototypeController struct {
+	BaseController
+	Prefix string
+}
+
+func (c *prototypeController) Serve(ctx context.Context) error {
+	GetContext(ctx).ServeRawData([]byte(c.Prefix + "ok"))
+	return nil
+}
+
+func TestControllerPrototypeFieldsArePreserved(t *testing.T) {
+	r := newTestRouter()
+	r.GET("/proto", &prototypeController{Prefix: "configured-"})
+
+	req := httptest.NewRequest(http.MethodGet, "/proto", nil)
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Body.String() != "configured-ok" {
+		t.Fatalf("body = %q, want configured-ok", rec.Body.String())
+	}
+}
