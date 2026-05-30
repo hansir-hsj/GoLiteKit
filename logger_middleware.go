@@ -8,22 +8,42 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
+// LoggerOptions configures the logger middleware.
+type LoggerOptions struct {
+	LogRequestBody  bool
+	LogResponseBody bool
+}
+
 // LoggerAsMiddleware logs each request and its outcome using logInst.
 // panicInst is optional; pass nil to skip panic logging.
-func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger) Middleware {
+func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger, opts ...LoggerOptions) Middleware {
+	var opt LoggerOptions
+	useEnv := true
+	if len(opts) > 0 {
+		opt = opts[0]
+		useEnv = false
+	}
+
 	return func(next Handler) Handler {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) (rerr error) {
 			gcx := GetContext(ctx)
 
 			rw := newResponseCapture(w)
 			defer func() {
-				if env.LogRequestBody() && r.Method != http.MethodGet && r.Method != http.MethodDelete {
+				logReqBody := opt.LogRequestBody
+				logRespBody := opt.LogResponseBody
+				if useEnv {
+					logReqBody = env.LogRequestBody()
+					logRespBody = env.LogResponseBody()
+				}
+
+				if logReqBody && r.Method != http.MethodGet && r.Method != http.MethodDelete {
 					if gcx != nil && len(gcx.RawBody) > 0 {
 						logger.AddInfo(ctx, "request", string(gcx.RawBody))
 					}
 				}
 
-				if env.LogResponseBody() && len(rw.body) > 0 {
+				if logRespBody && len(rw.body) > 0 {
 					logger.AddInfo(ctx, "response", string(rw.body))
 				}
 
