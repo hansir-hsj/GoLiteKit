@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -87,5 +88,69 @@ func TestLoggerAsMiddleware_WithRealLogger(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestLoggerBodyTruncation(t *testing.T) {
+	body := strings.Repeat("a", 5000)
+	result := truncateBody([]byte(body), DefaultLogBodyLimit)
+
+	if int64(len(result)) > DefaultLogBodyLimit+20 {
+		t.Fatalf("truncated body too long: %d", len(result))
+	}
+	if !strings.HasSuffix(result, "...(truncated)") {
+		t.Fatal("expected truncation suffix")
+	}
+}
+
+func TestLoggerBodyTruncation_Short(t *testing.T) {
+	body := "short body"
+	result := truncateBody([]byte(body), DefaultLogBodyLimit)
+
+	if result != body {
+		t.Fatalf("result = %q, want %q", result, body)
+	}
+}
+
+func TestLoggerRedactSensitiveKeys(t *testing.T) {
+	input := `{"username":"alice","password":"secret123","token":"abc"}`
+	result := redactSensitiveKeys(input)
+
+	if strings.Contains(result, "secret123") {
+		t.Fatalf("password not redacted: %s", result)
+	}
+	if strings.Contains(result, `"abc"`) {
+		t.Fatalf("token not redacted: %s", result)
+	}
+	if !strings.Contains(result, "alice") {
+		t.Fatalf("non-sensitive field was redacted: %s", result)
+	}
+}
+
+func TestLoggerRedactSensitiveKeys_CaseInsensitive(t *testing.T) {
+	input := `{"Password":"mypass","SECRET":"key","Authorization":"Bearer xyz"}`
+	result := redactSensitiveKeys(input)
+
+	if strings.Contains(result, "mypass") || strings.Contains(result, `"key"`) || strings.Contains(result, "Bearer") {
+		t.Fatalf("sensitive keys not redacted (case-insensitive): %s", result)
+	}
+}
+
+func TestLoggerIsLoggableContentType(t *testing.T) {
+	tests := []struct {
+		ct   string
+		want bool
+	}{
+		{"application/json", true},
+		{"text/plain", true},
+		{"", true},
+		{"multipart/form-data", false},
+		{"application/octet-stream", false},
+		{"image/png", false},
+	}
+	for _, tt := range tests {
+		if got := isLoggableContentType(tt.ct); got != tt.want {
+			t.Errorf("isLoggableContentType(%q) = %v, want %v", tt.ct, got, tt.want)
+		}
 	}
 }
