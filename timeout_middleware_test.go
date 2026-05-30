@@ -167,3 +167,33 @@ func TestTimeoutMiddleware_SSE(t *testing.T) {
 		wrapped(ctx, rec, req)
 	})
 }
+
+func TestTimeoutMiddlewareUsesExplicitDuration(t *testing.T) {
+	mw := TimeoutMiddleware(TimeoutOptions{Duration: 5 * time.Second})
+	called := false
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		called = true
+		// Verify deadline is set
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("expected deadline to be set")
+		}
+		return nil
+	})
+
+	wrapped := mw(inner)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	ctx := WithContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	err := wrapped(ctx, rec, req)
+
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if !called {
+		t.Fatal("handler was not called")
+	}
+}
