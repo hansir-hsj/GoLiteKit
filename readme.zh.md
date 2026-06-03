@@ -69,7 +69,7 @@ curl http://localhost:8080/hello
 
 ## 请求绑定
 
-定义请求结构体，使用 `BaseController[T]` —— 框架自动绑定 JSON、form-urlencoded 和 multipart。
+定义请求结构体，使用 `BaseControllerOf[T]` —— 框架自动绑定 JSON、form-urlencoded 和 multipart。
 
 ```go
 type CreateUserReq struct {
@@ -149,11 +149,10 @@ api.GET("/profile", &ProfileController{})
 
 ```go
 limiter := glk.NewRateLimiter(
-    glk.WithGlobalLimit(1000, 1000), // 全局 1000 req/s
-    glk.WithPerKeyLimit(10, 10),     // 每 IP 10 req/s
+    10, 10, // 每个 key 10 req/s
+    glk.WithGlobalRateLimiter(1000, 1000), // 全局 1000 req/s
     glk.WithTTL(5 * time.Minute),
 )
-
 app.Use(limiter.RateLimiterAsMiddleware(glk.ByIP))
 ```
 
@@ -176,18 +175,22 @@ func (c *StreamController) Serve(ctx context.Context) error {
 
 ## 集成 DB 和 Redis
 
-```go
-db, _ := glk.NewDB("db.toml")
-rdb, _ := glk.NewRedis("redis.toml")
+最小配置片段：
 
-app := glk.NewApp(
-    glk.WithDB(db),
-    glk.WithRedis(rdb),
+```go
+import (
+    glk "github.com/hansir-hsj/GoLiteKit"
+    glkdb "github.com/hansir-hsj/GoLiteKit/db"
+    glkredis "github.com/hansir-hsj/GoLiteKit/redis"
 )
+
+dbConn, _ := glkdb.NewFromConfig("db.toml")
+rdb, _ := glkredis.NewFromConfig("redis.toml")
+app := glk.NewApp(glk.WithDB(dbConn), glk.WithRedis(rdb))
 
 // 在控制器中使用
 func (c *MyController) Serve(ctx context.Context) error {
-    db := c.DB()     // *gorm.DB
+    dbConn := c.DB() // *gorm.DB
     rdb := c.Redis() // *redis.Client
     // ...
     return nil
@@ -210,13 +213,20 @@ app.GET("/ping", glk.HandlerFunc(func(ctx *glk.Context) error {
 
 ```go
 app := glk.NewApp(
-    glk.WithDB(db),
     glk.WithService("cache", myCache),
 )
 
+// 在 HandlerFunc 中使用
+app.GET("/cache", glk.HandlerFunc(func(ctx *glk.Context) error {
+    cache := ctx.Service("cache").(MyCache)
+    // ...
+    return ctx.ServeJSON(map[string]string{"status": "ok"})
+}))
+
 // 在控制器中使用
 func (c *MyController) Serve(ctx context.Context) error {
-    cache := c.Services().Get("cache").(MyCache)
+    gcx := glk.GetContext(ctx)
+    cache := gcx.Service("cache").(MyCache)
     // ...
     return nil
 }
@@ -243,6 +253,12 @@ app.Start()
 app.Shutdown(ctx)
 ```
 
+测试或自定义绑定地址时，可以传入显式 `ServerConfig`：
+
+```go
+app.Start(glk.ServerConfig{Addr: "127.0.0.1:0"})
+```
+
 ## Pprof
 
 挂载受保护的 pprof 端点：
@@ -258,19 +274,28 @@ app.MountPprof(glk.PprofOptions{
 
 ```toml
 # app.toml
-[server]
-addr    = ":8080"
+[HttpServer]
+appName = "myapp"
+runMode = "debug"
 network = "tcp"
+addr = ":8080"
+enablePprof = false
 
-[logger]
-dir      = "./logs"
-filename = "app.log"
-level    = "INFO"
-rotate   = "1day"
+[HttpServer.Timeout]
+readTimeout = 1000
+readHeaderTimeout = 200
+writeTimeout = 15000
+idleTimeout = 5000
+shutdownTimeout = 5000
 
-[timeout]
-timeout     = 3000   # 毫秒
-sse_timeout = 60000  # 毫秒
+[HttpServer.Logger]
+configFile = "logger.toml"
+
+[HttpServer.DB]
+configFile = "db.toml"
+
+[HttpServer.Redis]
+configFile = "redis.toml"
 ```
 
 ```go

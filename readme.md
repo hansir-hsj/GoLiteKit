@@ -69,7 +69,7 @@ curl http://localhost:8080/hello
 
 ## Request Binding
 
-Define a request struct and use `BaseController[T]` — the framework binds JSON,
+Define a request struct and use `BaseControllerOf[T]` — the framework binds JSON,
 form-urlencoded, and multipart automatically.
 
 ```go
@@ -150,11 +150,10 @@ api.GET("/profile", &ProfileController{})
 
 ```go
 limiter := glk.NewRateLimiter(
-    glk.WithGlobalLimit(1000, 1000), // 1000 req/s globally
-    glk.WithPerKeyLimit(10, 10),     // 10 req/s per IP
+    10, 10, // 10 req/s per key
+    glk.WithGlobalRateLimiter(1000, 1000), // 1000 req/s globally
     glk.WithTTL(5 * time.Minute),
 )
-
 app.Use(limiter.RateLimiterAsMiddleware(glk.ByIP))
 ```
 
@@ -177,18 +176,22 @@ func (c *StreamController) Serve(ctx context.Context) error {
 
 ## With DB and Redis
 
-```go
-db, _ := glk.NewDB("db.toml")
-rdb, _ := glk.NewRedis("redis.toml")
+Minimal setup excerpt:
 
-app := glk.NewApp(
-    glk.WithDB(db),
-    glk.WithRedis(rdb),
+```go
+import (
+    glk "github.com/hansir-hsj/GoLiteKit"
+    glkdb "github.com/hansir-hsj/GoLiteKit/db"
+    glkredis "github.com/hansir-hsj/GoLiteKit/redis"
 )
+
+dbConn, _ := glkdb.NewFromConfig("db.toml")
+rdb, _ := glkredis.NewFromConfig("redis.toml")
+app := glk.NewApp(glk.WithDB(dbConn), glk.WithRedis(rdb))
 
 // Access in controller
 func (c *MyController) Serve(ctx context.Context) error {
-    db := c.DB()    // *gorm.DB
+    dbConn := c.DB() // *gorm.DB
     rdb := c.Redis() // *redis.Client
     // ...
     return nil
@@ -211,13 +214,20 @@ Register and retrieve custom services beyond DB/Redis:
 
 ```go
 app := glk.NewApp(
-    glk.WithDB(db),
     glk.WithService("cache", myCache),
 )
 
+// In HandlerFunc
+app.GET("/cache", glk.HandlerFunc(func(ctx *glk.Context) error {
+    cache := ctx.Service("cache").(MyCache)
+    // ...
+    return ctx.ServeJSON(map[string]string{"status": "ok"})
+}))
+
 // In controller
 func (c *MyController) Serve(ctx context.Context) error {
-    cache := c.Services().Get("cache").(MyCache)
+    gcx := glk.GetContext(ctx)
+    cache := gcx.Service("cache").(MyCache)
     // ...
     return nil
 }
@@ -244,6 +254,12 @@ app.Start()
 app.Shutdown(ctx)
 ```
 
+For tests or custom bind addresses, pass an explicit `ServerConfig`:
+
+```go
+app.Start(glk.ServerConfig{Addr: "127.0.0.1:0"})
+```
+
 ## Pprof
 
 Mount protected pprof endpoints:
@@ -259,19 +275,28 @@ app.MountPprof(glk.PprofOptions{
 
 ```toml
 # app.toml
-[server]
-addr    = ":8080"
+[HttpServer]
+appName = "myapp"
+runMode = "debug"
 network = "tcp"
+addr = ":8080"
+enablePprof = false
 
-[logger]
-dir      = "./logs"
-filename = "app.log"
-level    = "INFO"
-rotate   = "1day"
+[HttpServer.Timeout]
+readTimeout = 1000
+readHeaderTimeout = 200
+writeTimeout = 15000
+idleTimeout = 5000
+shutdownTimeout = 5000
 
-[timeout]
-timeout     = 3000   # ms
-sse_timeout = 60000  # ms
+[HttpServer.Logger]
+configFile = "logger.toml"
+
+[HttpServer.DB]
+configFile = "db.toml"
+
+[HttpServer.Redis]
+configFile = "redis.toml"
 ```
 
 ```go

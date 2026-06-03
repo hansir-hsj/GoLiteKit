@@ -1,3 +1,7 @@
 # Logger test/runtime output
 logger/logs/*.log
 logger/logs/*.log.*
+
+# Local Claude/project planning files
+CLAUDE.md
+docs/

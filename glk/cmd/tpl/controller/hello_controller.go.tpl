@@ -7,7 +7,7 @@ import (
 )
 
 type HelloController struct {
-	kit.BaseController[kit.NoBody]
+	kit.BaseController
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {
