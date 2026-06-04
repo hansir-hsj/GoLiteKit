@@ -3,6 +3,7 @@ package golitekit
 import (
 	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -171,6 +172,10 @@ type formRequest struct {
 	Age      int    `form:"age"`
 }
 
+type multipartRequest struct {
+	Title string `form:"title"`
+}
+
 func TestBaseController_Init_DoesNotParseForm(t *testing.T) {
 	form := url.Values{}
 	form.Set("username", "bob")
@@ -221,6 +226,57 @@ func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 	}
 	if c.Request.Age != 30 {
 		t.Errorf("Age = %d, want 30", c.Request.Age)
+	}
+}
+
+func TestBaseController_ParseRequest_MultipartForm(t *testing.T) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("title", "upload"); err != nil {
+		t.Fatalf("WriteField: %v", err)
+	}
+	fileWriter, err := writer.CreateFormFile("file", "hello.txt")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := fileWriter.Write([]byte("hello")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	rec := httptest.NewRecorder()
+	ctx := WithContext(req.Context())
+	gcx := GetContext(ctx)
+	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	req = req.WithContext(ctx)
+
+	c := &BaseControllerOf[multipartRequest]{}
+	if err := c.Init(req.Context()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if req.MultipartForm != nil {
+		t.Fatalf("req.MultipartForm = %v, want nil", req.MultipartForm)
+	}
+
+	if err := c.ParseRequest(req.Context(), nil); err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+
+	if c.Request.Title != "upload" {
+		t.Errorf("Title = %q, want %q", c.Request.Title, "upload")
+	}
+	file, header, err := c.FormFile("file")
+	if err != nil {
+		t.Fatalf("FormFile: %v", err)
+	}
+	defer file.Close()
+	if header.Filename != "hello.txt" {
+		t.Errorf("Filename = %q, want %q", header.Filename, "hello.txt")
 	}
 }
 
