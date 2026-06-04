@@ -89,6 +89,16 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 }
 ```
 
+### Controller 生命周期
+
+Controller 请求按以下顺序执行：
+
+```text
+Init → ParseRequest → Validate → Serve → Finalize
+```
+
+`ParseRequest` 会在 `Validate` 之前绑定 JSON/form/multipart 数据，因此校验逻辑可以安全读取 `c.GetRequest()` 或 `c.Request`。认证、feature flag 等解析前检查建议放在 middleware 或 `Init`。
+
 ## REST 控制器
 
 `RestControllerOf[T]` 将每个响应封装为统一的 JSON 格式：

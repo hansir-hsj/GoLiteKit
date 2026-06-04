@@ -90,6 +90,16 @@ func (c *CreateUserController) Serve(ctx context.Context) error {
 }
 ```
 
+### Controller Lifecycle
+
+Controller requests run through this order:
+
+```text
+Init → ParseRequest → Validate → Serve → Finalize
+```
+
+`ParseRequest` binds JSON/form/multipart data before `Validate`, so validation code can safely inspect `c.GetRequest()` or `c.Request`. Use middleware or `Init` for pre-parse checks such as authentication or feature flags.
+
 ## REST Controller
 
 `RestControllerOf[T]` wraps every response in a standard JSON envelope:
