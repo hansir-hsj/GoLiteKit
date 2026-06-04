@@ -162,4 +162,3 @@ func isLoggableContentType(ct string) bool {
 	}
 	return true
 }
-
