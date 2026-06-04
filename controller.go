@@ -95,11 +95,6 @@ func (c *BaseControllerOf[T]) Init(ctx context.Context) error {
 	}
 	c.request = c.gcx.Request()
 	c.logger = c.gcx.logger
-
-	if err := c.parseBody(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -127,6 +122,10 @@ func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context, body []byte) err
 		return nil
 	}
 
+	if err := c.parseBody(); err != nil {
+		return err
+	}
+
 	ct := c.request.Header.Get("Content-Type")
 
 	// Form types: parseBody already called ParseForm/ParseMultipartForm,
@@ -136,11 +135,11 @@ func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context, body []byte) err
 		return c.bindFormData(&c.Request)
 	}
 
-	// For all other types (JSON, etc.) rely on the raw body bytes.
-	if len(body) == 0 {
+	// For all other types (JSON, etc.) rely on RawBody populated by parseBody.
+	if len(c.gcx.RawBody) == 0 {
 		return nil
 	}
-	return json.Unmarshal(body, &c.Request)
+	return json.Unmarshal(c.gcx.RawBody, &c.Request)
 }
 
 // bindFormData binds form data to a struct.
