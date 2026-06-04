@@ -18,10 +18,10 @@ func (g *RouterGroup) Use(middlewares ...Middleware) *RouterGroup {
 func (g *RouterGroup) GET(path string, c any)     { g.handle(http.MethodGet, path, c) }
 func (g *RouterGroup) POST(path string, c any)    { g.handle(http.MethodPost, path, c) }
 func (g *RouterGroup) PUT(path string, c any)     { g.handle(http.MethodPut, path, c) }
-func (g *RouterGroup) DELETE(path string, c any)   { g.handle(http.MethodDelete, path, c) }
-func (g *RouterGroup) PATCH(path string, c any)    { g.handle(http.MethodPatch, path, c) }
-func (g *RouterGroup) HEAD(path string, c any)     { g.handle(http.MethodHead, path, c) }
-func (g *RouterGroup) OPTIONS(path string, c any)  { g.handle(http.MethodOptions, path, c) }
+func (g *RouterGroup) DELETE(path string, c any)  { g.handle(http.MethodDelete, path, c) }
+func (g *RouterGroup) PATCH(path string, c any)   { g.handle(http.MethodPatch, path, c) }
+func (g *RouterGroup) HEAD(path string, c any)    { g.handle(http.MethodHead, path, c) }
+func (g *RouterGroup) OPTIONS(path string, c any) { g.handle(http.MethodOptions, path, c) }
 
 func (g *RouterGroup) Any(path string, c any) {
 	g.GET(path, c)

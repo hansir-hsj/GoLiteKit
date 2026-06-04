@@ -19,9 +19,9 @@ import (
 var tpl embed.FS
 
 var (
-	moduleFlag  string
-	forceFlag   bool
-	dryRunFlag  bool
+	moduleFlag   string
+	forceFlag    bool
+	dryRunFlag   bool
 	skipTidyFlag bool
 )
 
