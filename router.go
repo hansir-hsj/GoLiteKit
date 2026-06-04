@@ -65,10 +65,10 @@ func (r *Router) Use(middlewares ...Middleware) *Router {
 func (r *Router) GET(path string, c any)     { r.handle(http.MethodGet, path, c, nil) }
 func (r *Router) POST(path string, c any)    { r.handle(http.MethodPost, path, c, nil) }
 func (r *Router) PUT(path string, c any)     { r.handle(http.MethodPut, path, c, nil) }
-func (r *Router) DELETE(path string, c any)   { r.handle(http.MethodDelete, path, c, nil) }
-func (r *Router) PATCH(path string, c any)    { r.handle(http.MethodPatch, path, c, nil) }
-func (r *Router) HEAD(path string, c any)     { r.handle(http.MethodHead, path, c, nil) }
-func (r *Router) OPTIONS(path string, c any)  { r.handle(http.MethodOptions, path, c, nil) }
+func (r *Router) DELETE(path string, c any)  { r.handle(http.MethodDelete, path, c, nil) }
+func (r *Router) PATCH(path string, c any)   { r.handle(http.MethodPatch, path, c, nil) }
+func (r *Router) HEAD(path string, c any)    { r.handle(http.MethodHead, path, c, nil) }
+func (r *Router) OPTIONS(path string, c any) { r.handle(http.MethodOptions, path, c, nil) }
 
 // Any registers all common HTTP methods.
 func (r *Router) Any(path string, c any) {
@@ -129,13 +129,14 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 				return WrapError(err, http.StatusInternalServerError)
 			}
 		}
-		if val, ok := handler.(Validator); ok {
-			if err := val.Validate(ctx); err != nil {
+		// Parse before validation so Validate can inspect bound request data.
+		if parser, ok := handler.(RequestParser); ok {
+			if err := parser.ParseRequest(ctx, gcx.RawBody); err != nil {
 				return WrapError(err, http.StatusBadRequest)
 			}
 		}
-		if parser, ok := handler.(RequestParser); ok {
-			if err := parser.ParseRequest(ctx, gcx.RawBody); err != nil {
+		if val, ok := handler.(Validator); ok {
+			if err := val.Validate(ctx); err != nil {
 				return WrapError(err, http.StatusBadRequest)
 			}
 		}
