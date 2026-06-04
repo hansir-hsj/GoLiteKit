@@ -60,6 +60,23 @@ func TestBaseController_Init_WithContext(t *testing.T) {
 	_ = rec
 }
 
+func TestBaseController_Init_DoesNotParseBody(t *testing.T) {
+	body := []byte(`{"name":"alice","value":42}`)
+	req, _, _ := makeRequest(http.MethodPost, "/", body, "application/json")
+
+	c := &BaseControllerOf[jsonRequest]{}
+	if err := c.Init(req.Context()); err != nil {
+		t.Fatalf("Init failed: %v", err)
+	}
+
+	if len(c.gcx.RawBody) != 0 {
+		t.Fatalf("RawBody length = %d, want 0", len(c.gcx.RawBody))
+	}
+	if c.Request != (jsonRequest{}) {
+		t.Fatalf("Request = %+v, want zero value", c.Request)
+	}
+}
+
 // ============================================================================
 // parseBody / ParseRequest for JSON
 // ============================================================================
@@ -83,6 +100,34 @@ func TestBaseController_ParseRequest_JSON(t *testing.T) {
 		t.Fatalf("ParseRequest: %v", err)
 	}
 
+	if c.Request.Name != "alice" {
+		t.Errorf("Name = %q, want %q", c.Request.Name, "alice")
+	}
+	if c.Request.Value != 42 {
+		t.Errorf("Value = %d, want 42", c.Request.Value)
+	}
+}
+
+func TestBaseController_ParseRequest_PopulatesRawBodyAndRequest(t *testing.T) {
+	body := []byte(`{"name":"alice","value":42}`)
+	req, _, _ := makeRequest(http.MethodPost, "/", body, "application/json")
+
+	c := &BaseControllerOf[jsonRequest]{}
+	if err := c.Init(req.Context()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	if len(c.gcx.RawBody) != 0 {
+		t.Fatalf("RawBody length before ParseRequest = %d, want 0", len(c.gcx.RawBody))
+	}
+
+	if err := c.ParseRequest(req.Context(), nil); err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+
+	if !bytes.Equal(c.gcx.RawBody, body) {
+		t.Fatalf("RawBody = %q, want %q", c.gcx.RawBody, body)
+	}
 	if c.Request.Name != "alice" {
 		t.Errorf("Name = %q, want %q", c.Request.Name, "alice")
 	}
@@ -126,6 +171,26 @@ type formRequest struct {
 	Age      int    `form:"age"`
 }
 
+func TestBaseController_Init_DoesNotParseForm(t *testing.T) {
+	form := url.Values{}
+	form.Set("username", "bob")
+	form.Set("age", "30")
+
+	req, _, _ := makeRequest(http.MethodPost, "/", []byte(form.Encode()), "application/x-www-form-urlencoded")
+
+	c := &BaseControllerOf[formRequest]{}
+	if err := c.Init(req.Context()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	if req.Form != nil {
+		t.Fatalf("req.Form = %v, want nil", req.Form)
+	}
+	if c.Request != (formRequest{}) {
+		t.Fatalf("Request = %+v, want zero value", c.Request)
+	}
+}
+
 func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 	form := url.Values{}
 	form.Set("username", "bob")
@@ -146,7 +211,7 @@ func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// parseBody calls ParseForm; ParseRequest now binds directly from request.Form.
+	// ParseRequest calls ParseForm and binds directly from request.Form.
 	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
@@ -183,7 +248,7 @@ func TestSetFieldValue_PointerToString(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	// ParseRequest now handles form types correctly without relying on RawBody.
+	// ParseRequest handles form types by parsing the form before binding fields.
 	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
