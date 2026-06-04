@@ -51,6 +51,8 @@ type Validator interface {
 }
 
 // RequestParser is called after Init and before Validate, and owns request parsing.
+// The body argument is retained for compatibility and may be nil; custom parsers
+// should read from the request or context as needed.
 // BaseControllerOf implements JSON/form/multipart parsing automatically.
 type RequestParser interface {
 	ParseRequest(ctx context.Context, body []byte) error
