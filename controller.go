@@ -45,13 +45,13 @@ type Initializer interface {
 	Init(ctx context.Context) error
 }
 
-// Validator is called after Init to check preconditions (auth, feature flags, etc).
+// Validator is called after ParseRequest to validate parsed request data and controller state.
 type Validator interface {
 	Validate(ctx context.Context) error
 }
 
-// RequestParser is called after Validate to parse the request body.
-// BaseControllerOf implements this automatically with JSON/form binding.
+// RequestParser is called after Init and before Validate, and owns request parsing.
+// BaseControllerOf implements JSON/form/multipart parsing automatically.
 type RequestParser interface {
 	ParseRequest(ctx context.Context, body []byte) error
 }
