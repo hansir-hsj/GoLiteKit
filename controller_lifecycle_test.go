@@ -3,6 +3,7 @@ package golitekit
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -238,6 +239,90 @@ func TestControllerLifecycle_NoBodySkipsMalformedJSONParsing(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not JSON: %v; body = %s", err, rec.Body.String())
+	}
+	if body["ok"] != "true" {
+		t.Fatalf("response ok = %q, want true", body["ok"])
+	}
+}
+
+type customParserRecorder struct {
+	mu         sync.Mutex
+	bodyArgLen int
+	name       string
+}
+
+func (r *customParserRecorder) record(bodyArgLen int, name string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.bodyArgLen = bodyArgLen
+	r.name = name
+}
+
+func (r *customParserRecorder) snapshot() (int, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.bodyArgLen, r.name
+}
+
+type customParserReadsRequestController struct {
+	BaseController
+	recorder *customParserRecorder
+	name     string
+}
+
+func (c *customParserReadsRequestController) ParseRequest(ctx context.Context, body []byte) error {
+	bodyArgLen := len(body)
+
+	rawBody, err := io.ReadAll(GetContext(ctx).Request().Body)
+	if err != nil {
+		return err
+	}
+
+	var payload lifecycleRequest
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		return err
+	}
+	c.name = payload.Name
+	c.recorder.record(bodyArgLen, c.name)
+	return nil
+}
+
+func (c *customParserReadsRequestController) Validate(ctx context.Context) error {
+	if c.name != "alice" {
+		return ErrBadRequest("name is required", nil)
+	}
+	return nil
+}
+
+func (c *customParserReadsRequestController) Serve(ctx context.Context) error {
+	return c.ServeJSON(map[string]string{"ok": "true"})
+}
+
+func TestControllerLifecycle_CustomRequestParserOwnsBodyParsing(t *testing.T) {
+	recorder := &customParserRecorder{}
+	r := newTestRouter()
+	r.POST("/custom-parser", &customParserReadsRequestController{recorder: recorder})
+
+	req := httptest.NewRequest(http.MethodPost, "/custom-parser", strings.NewReader(`{"name":"alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	bodyArgLen, name := recorder.snapshot()
+	if bodyArgLen != 0 {
+		t.Fatalf("ParseRequest body arg len = %d, want 0", bodyArgLen)
+	}
+	if name != "alice" {
+		t.Fatalf("custom parser name = %q, want alice", name)
 	}
 
 	var body map[string]string

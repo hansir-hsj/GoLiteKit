@@ -112,7 +112,6 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 
 	// innerHandler is stable: built once at registration, not recreated per request.
 	innerHandler := Handler(func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
-		gcx := GetContext(ctx)
 		handler := ctrlPool.Get().(Controller)
 		defer func() {
 			if res, ok := handler.(Resettable); ok {
@@ -130,8 +129,11 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 			}
 		}
 		// Parse before validation so Validate can inspect bound request data.
+		// Custom RequestParser implementations own request parsing; the router does
+		// not pre-read the request body. BaseControllerOf.ParseRequest handles the
+		// default JSON/form/multipart parsing path.
 		if parser, ok := handler.(RequestParser); ok {
-			if err := parser.ParseRequest(ctx, gcx.RawBody); err != nil {
+			if err := parser.ParseRequest(ctx, nil); err != nil {
 				return WrapError(err, http.StatusBadRequest)
 			}
 		}
