@@ -10,10 +10,12 @@ import (
 
 // Services holds all external dependencies (DB, Redis, Logger, etc.)
 type Services struct {
-	db          *gorm.DB
-	redis       *redis.Client
-	logger      logger.Logger
-	panicLogger *logger.PanicLogger
+	db                      *gorm.DB
+	redis                   *redis.Client
+	logger                  logger.Logger
+	panicLogger             *logger.PanicLogger
+	observer                Observer
+	observabilityMiddleware Middleware
 
 	mu       sync.RWMutex
 	registry map[string]any
@@ -35,6 +37,14 @@ func WithLogger(l logger.Logger) ServiceOption {
 
 func WithPanicLogger(pl *logger.PanicLogger) ServiceOption {
 	return func(s *Services) { s.panicLogger = pl }
+}
+
+func WithObserver(observer Observer) ServiceOption {
+	return func(s *Services) { s.observer = observer }
+}
+
+func WithObservabilityMiddleware(m Middleware) ServiceOption {
+	return func(s *Services) { s.observabilityMiddleware = m }
 }
 
 // WithService registers a named service in the generic registry.
@@ -68,6 +78,20 @@ func (s *Services) PanicLogger() *logger.PanicLogger {
 		return nil
 	}
 	return s.panicLogger
+}
+
+func (s *Services) Observer() Observer {
+	if s == nil {
+		return nil
+	}
+	return s.observer
+}
+
+func (s *Services) ObservabilityMiddleware() Middleware {
+	if s == nil {
+		return nil
+	}
+	return s.observabilityMiddleware
 }
 
 // Set stores a named service.
