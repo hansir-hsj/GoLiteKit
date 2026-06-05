@@ -8,6 +8,10 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+---
+
+## [v1.2.0] - 2026-06-05
+
 ### Changed
 - Controller lifecycle now runs request parsing before validation: `Init → ParseRequest → Validate → Serve → Finalize`.
 - `BaseControllerOf.Init` no longer reads or parses request bodies; parsing is owned by `ParseRequest`.

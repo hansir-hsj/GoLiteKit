@@ -3,7 +3,7 @@
 [English](readme.md) | [中文](readme.zh.md)
 
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-00ADD8?style=for-the-badge&logo=go&logoColor=white)](https://golang.org)
-[![Version](https://img.shields.io/badge/version-v1.1.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-v1.2.0-blue?style=for-the-badge)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)](LICENSE)
 
 轻量级 Go Web 框架，基于 `net/http`，专注简洁和清晰。
