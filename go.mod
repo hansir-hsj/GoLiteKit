@@ -7,7 +7,7 @@ toolchain go1.23.6
 require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/go-sql-driver/mysql v1.8.1
-	github.com/redis/go-redis/v9 v9.7.1
+	github.com/redis/go-redis/v9 v9.7.3
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/time v0.12.0
 	gopkg.in/yaml.v2 v2.4.0
