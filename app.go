@@ -49,7 +49,7 @@ func NewApp(opts ...ServiceOption) *App {
 	}
 	defaultMiddlewares = append(defaultMiddlewares,
 		LoggerAsMiddleware(services.logger, services.panicLogger),
-		TrackerMiddleware(),
+		LogIDMiddleware(),
 		TimeoutMiddleware(),
 		ContextAsMiddleware(),
 	)
@@ -111,7 +111,7 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 	}
 	defaultMiddlewares = append(defaultMiddlewares,
 		LoggerAsMiddleware(services.logger, services.panicLogger),
-		TrackerMiddleware(),
+		LogIDMiddleware(),
 		TimeoutMiddleware(),
 		ContextAsMiddleware(),
 	)
