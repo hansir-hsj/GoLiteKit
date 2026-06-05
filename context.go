@@ -29,6 +29,7 @@ func (gcx *Context) reset() {
 	gcx.rawHtml = ""
 	gcx.statusCode = 0
 	gcx.sseWriter = nil
+	gcx.logID = ""
 	for k := range gcx.data {
 		delete(gcx.data, k)
 	}
@@ -41,7 +42,6 @@ type glkContext struct {
 	parent    context.Context
 	gcx       Context              // embedded by value — no separate allocation
 	loggerCtx logger.LoggerContext // embedded by value — no separate allocation
-	tracker   Tracker              // embedded by value — avoids context.WithValue for tracker
 }
 
 // glkCtxPool reuses *glkContext (and its embedded structs) across requests.
@@ -58,10 +58,6 @@ func (c *glkContext) Value(key any) any {
 		return &c.gcx
 	case logger.LoggerKey:
 		return &c.loggerCtx
-	case trackerKey:
-		if c.tracker.started {
-			return &c.tracker
-		}
 	}
 	return c.parent.Value(key)
 }
@@ -71,7 +67,6 @@ func (c *glkContext) release() {
 	c.parent = nil
 	c.gcx.reset()
 	c.loggerCtx.Reset()
-	c.tracker.resetForPool()
 	glkCtxPool.Put(c)
 }
 
@@ -105,6 +100,8 @@ type Context struct {
 	statusCode   int
 
 	sseWriter *SSEWriter
+
+	logID string
 
 	data     map[string]any
 	dataLock sync.RWMutex

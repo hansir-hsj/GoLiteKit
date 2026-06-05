@@ -141,7 +141,7 @@ func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	ctx := WithContext(req.Context())
-	ctx = WithTracker(ctx)
+	EnsureLogID(ctx)
 	gcx := GetContext(ctx)
 	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
 
@@ -159,6 +159,6 @@ func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if resp.LogID == "" {
-		t.Error("expected LogID to be populated when Tracker is present")
+		t.Error("expected LogID to be populated when log ID is present")
 	}
 }

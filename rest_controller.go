@@ -20,10 +20,7 @@ type RestControllerOf[T any] struct {
 }
 
 func (c *RestControllerOf[T]) ServeData(ctx context.Context, data any) error {
-	logID := ""
-	if tracker := GetTracker(ctx); tracker != nil {
-		logID = tracker.LogID()
-	}
+	logID := EnsureLogID(ctx)
 	res := Response{
 		Status: OK,
 		Msg:    "OK",
@@ -38,10 +35,7 @@ func (c *RestControllerOf[T]) ServeOK(ctx context.Context) error {
 }
 
 func (c *RestControllerOf[T]) ServeMsgData(ctx context.Context, msg string, data any) error {
-	logID := ""
-	if tracker := GetTracker(ctx); tracker != nil {
-		logID = tracker.LogID()
-	}
+	logID := EnsureLogID(ctx)
 	res := Response{
 		Status: OK,
 		Msg:    msg,
@@ -52,10 +46,7 @@ func (c *RestControllerOf[T]) ServeMsgData(ctx context.Context, msg string, data
 }
 
 func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg string) error {
-	logID := ""
-	if tracker := GetTracker(ctx); tracker != nil {
-		logID = tracker.LogID()
-	}
+	logID := EnsureLogID(ctx)
 	res := Response{
 		Status: status,
 		Msg:    msg,
