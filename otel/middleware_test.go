@@ -11,6 +11,8 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
@@ -64,6 +66,40 @@ func TestMiddlewareCreatesRequestSpanAndInjectsLogFields(t *testing.T) {
 	if !ok || spanID == "" {
 		t.Fatalf("span_id log field missing or empty: %#v", fields["span_id"])
 	}
+}
+
+func TestMiddlewareRecordsHTTPMetrics(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	meterProvider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	exporter := tracetest.NewInMemoryExporter()
+	tracerProvider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+
+	observer := NewObserver(
+		WithTracerProvider(tracerProvider),
+		WithMeterProvider(meterProvider),
+	)
+	middleware := Middleware(observer)
+
+	req := httptest.NewRequest(http.MethodGet, "/users/123", nil)
+	req.Pattern = "GET /users/{id}"
+	recorder := httptest.NewRecorder()
+	handler := middleware(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.WriteHeader(http.StatusAccepted)
+		return nil
+	})
+
+	if err := handler(context.Background(), recorder, req); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+	assertMetricExists(t, rm, "glk.http.server.requests")
+	assertMetricExists(t, rm, "glk.http.server.duration_ms")
+	assertMetricMissing(t, rm, "glk.service.span.calls")
+	assertMetricMissing(t, rm, "glk.service.span.duration_ms")
 }
 
 func TestMiddlewareMarksServerError(t *testing.T) {

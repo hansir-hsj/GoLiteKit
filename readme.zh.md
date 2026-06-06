@@ -21,7 +21,8 @@
 - **中间件链** — 可组合、有序的中间件，支持路由组级别配置
 - **请求绑定** — 开箱即用支持 JSON、form-urlencoded、multipart
 - **SSE 支持** — 流式响应，自动 flush
-- **内置中间件** — 日志、错误处理、超时、限流、gzip 压缩、请求追踪
+- **内置中间件** — 日志、错误处理、超时、限流、gzip 压缩、log ID
+- **可观测性** — 可选 OpenTelemetry 适配器，支持请求 span、业务 span 和 metrics
 - **结构化日志** — 基于 `slog`，支持请求体日志（截断和脱敏）、日志轮转
 - **服务注册表** — DB、Redis、Logger 通过 functional options 注入 + 通用 `Set/Get` 支持自定义服务
 - **优雅生命周期** — `Start`、`ListenAndServe`（上下文感知）、`Shutdown` 可配置超时
@@ -117,6 +118,30 @@ func (c *ListUsersController) Serve(ctx context.Context) error {
     return c.ServeData(ctx, users)
 }
 ```
+
+## 可观测性
+
+GoLiteKit 在核心包中保留轻量抽象，并通过可选 `otel/` 子包接入 OpenTelemetry：
+
+```go
+import glkotel "github.com/hansir-hsj/GoLiteKit/otel"
+
+app := glk.NewApp(
+    glkotel.WithObservability(
+        glkotel.WithTracerProvider(tracerProvider),
+        glkotel.WithMeterProvider(meterProvider),
+    ),
+)
+```
+
+业务操作 span 显式通过 `context.Context` 创建：
+
+```go
+ctx, span := glk.StartSpan(ctx, "cache.lookup", glk.StringAttr("component", "cache"))
+defer span.End()
+```
+
+span 名称和 metric label 必须保持稳定、低基数。不要把原始 SQL、原始 URL、用户 ID、trace ID、log ID 或路径参数值作为 metric label。
 
 ## 路径参数
 
