@@ -22,10 +22,19 @@ func Middleware(observer *Observer, opts ...Option) glk.Middleware {
 			pattern := routePattern(r)
 			spanName := "HTTP " + r.Method + " " + pattern
 			ctx = glk.WithObserverContext(ctx, observer)
-			ctx, span := observer.StartSpan(ctx, spanName,
+			spanAttrs := []glk.Attribute{
 				glk.StringAttr("http.request.method", r.Method),
 				glk.StringAttr("http.route", pattern),
-			)
+			}
+			ctx, traceSpan := observer.tracer.Start(ctx, spanName, trace.WithAttributes(mapAttributes(spanAttrs)...))
+			span := &spanImpl{
+				ctx:     ctx,
+				span:    traceSpan,
+				metrics: observer.metrics,
+				name:    spanName,
+				started: time.Now(),
+				attrs:   spanAttrs,
+			}
 			defer span.End()
 
 			if traceSpan := trace.SpanFromContext(ctx); traceSpan != nil {
@@ -42,11 +51,13 @@ func Middleware(observer *Observer, opts ...Option) glk.Middleware {
 			cw := &statusCapture{ResponseWriter: w, statusCode: http.StatusOK}
 			err := next(ctx, cw, r.WithContext(ctx))
 			status := cw.statusCode
+			elapsed := time.Since(started)
 
 			span.SetAttributes(
 				glk.IntAttr("http.response.status_code", status),
-				glk.FloatAttr("http.server.duration_ms", float64(time.Since(started))/float64(time.Millisecond)),
+				glk.FloatAttr("http.server.duration_ms", float64(elapsed)/float64(time.Millisecond)),
 			)
+			observer.metrics.recordHTTP(ctx, r.Method, pattern, status, elapsed)
 
 			if err != nil {
 				span.SetError(err)

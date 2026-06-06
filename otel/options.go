@@ -3,6 +3,7 @@ package otel
 import (
 	"slices"
 
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -11,6 +12,7 @@ type Options struct {
 	ClientErrorAsSpanError bool
 	MetricAttributeLabels  []string
 	TracerProvider         trace.TracerProvider
+	MeterProvider          metric.MeterProvider
 }
 
 type Option func(*Options)
@@ -40,6 +42,12 @@ func WithMetricAttributeLabels(keys ...string) Option {
 func WithTracerProvider(provider trace.TracerProvider) Option {
 	return func(o *Options) {
 		o.TracerProvider = provider
+	}
+}
+
+func WithMeterProvider(provider metric.MeterProvider) Option {
+	return func(o *Options) {
+		o.MeterProvider = provider
 	}
 }
 
