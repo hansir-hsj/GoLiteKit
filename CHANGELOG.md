@@ -8,6 +8,16 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Optional OpenTelemetry observability adapter in `otel/`, including HTTP request spans, service spans, HTTP metrics, and service span metrics.
+- Core `Observer`, `Span`, and `StartSpan` abstractions without importing OpenTelemetry from the root package.
+
+### Changed
+- Request lifecycle now supports observability wrapping ErrorHandler so spans and metrics see final handled response status.
+
+### Removed
+- Removed the old `Tracker` public API. Use `StartSpan(ctx, name, attrs...)` instead.
+
 ---
 
 ## [v1.2.0] - 2026-06-05
