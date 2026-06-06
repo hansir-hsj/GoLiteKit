@@ -3,18 +3,19 @@ package golitekit
 import (
 	"context"
 	"net/http"
+
+	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
-func TrackerMiddleware() Middleware {
+func LogIDMiddleware() Middleware {
 	return func(next Handler) Handler {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			ctx = WithContext(ctx)
-			ctx = WithTracker(ctx)
-			tracker := GetTracker(ctx)
-			if tracker == nil {
-				return next(ctx, w, r)
+			ctx = logger.WithLoggerContext(ctx)
+			logID := EnsureLogID(ctx)
+			if logID != "" {
+				logger.AddInfo(ctx, "logid", logID)
 			}
-			defer tracker.LogTracker(ctx)
 			return next(ctx, w, r.WithContext(ctx))
 		}
 	}

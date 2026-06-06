@@ -21,7 +21,8 @@ Future benchmark reports should include the benchmark code, command, machine pro
 - **Middleware chain** — composable, ordered middleware with per-group support
 - **Request binding** — JSON, form-urlencoded, multipart out of the box
 - **SSE support** — streaming responses with proper flushing
-- **Built-in middleware** — logger, error handler, timeout, rate limiter, gzip, tracker
+- **Built-in middleware** — logger, error handler, timeout, rate limiter, gzip, log IDs
+- **Observability** — optional OpenTelemetry adapter for request spans, service spans, and metrics
 - **Structured logging** — based on `slog`, with body logging (truncation & redaction), log rotation
 - **Service registry** — DB, Redis, Logger via functional options + generic `Set/Get` for custom services
 - **Graceful lifecycle** — `Start`, `ListenAndServe` (context-aware), `Shutdown` with configurable timeout
@@ -118,6 +119,30 @@ func (c *ListUsersController) Serve(ctx context.Context) error {
     return c.ServeData(ctx, users)
 }
 ```
+
+## Observability
+
+GoLiteKit keeps observability abstractions in the core package and provides an optional OpenTelemetry adapter:
+
+```go
+import glkotel "github.com/hansir-hsj/GoLiteKit/otel"
+
+app := glk.NewApp(
+    glkotel.WithObservability(
+        glkotel.WithTracerProvider(tracerProvider),
+        glkotel.WithMeterProvider(meterProvider),
+    ),
+)
+```
+
+Create service spans explicitly with context:
+
+```go
+ctx, span := glk.StartSpan(ctx, "cache.lookup", glk.StringAttr("component", "cache"))
+defer span.End()
+```
+
+Use stable span names and bounded metric labels. Do not use raw SQL, raw URLs, user IDs, trace IDs, log IDs, or path parameter values as metric labels.
 
 ## Path Parameters
 

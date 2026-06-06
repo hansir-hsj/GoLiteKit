@@ -171,6 +171,10 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 			WithResponseWriter(w),
 			withServices(r.services),
 		)
+		if r.services != nil && r.services.Observer() != nil {
+			req = req.WithContext(WithObserverContext(req.Context(), r.services.Observer()))
+			gcx.SetContextOptions(WithRequest(req))
+		}
 
 		// Errors propagate up through the middleware chain. ErrorHandlerMiddleware
 		// (when present) handles them; otherwise fall back to a plain HTTP error.
