@@ -20,8 +20,8 @@ import (
 // RequestIDMiddleware adds a request ID header to every response.
 func RequestIDMiddleware(next glk.Handler) glk.Handler {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		if t := glk.GetTracker(ctx); t != nil {
-			w.Header().Set("X-Request-ID", t.LogID())
+		if logID := glk.EnsureLogID(ctx); logID != "" {
+			w.Header().Set("X-Request-ID", logID)
 		}
 		return next(ctx, w, r)
 	}

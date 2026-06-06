@@ -90,10 +90,7 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
 // handlePanic handles panic and returns 500 error.
 func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *errorHandlerConfig) {
 	ctx := r.Context()
-	logID := ""
-	if tracker := GetTracker(ctx); tracker != nil {
-		logID = tracker.LogID()
-	}
+	logID := EnsureLogID(ctx)
 
 	if gcx := GetContext(ctx); gcx != nil && gcx.PanicLogger() != nil {
 		gcx.PanicLogger().Report(ctx, recovered)
@@ -117,10 +114,7 @@ func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *err
 // handleAppError handles business errors.
 func handleAppError(w http.ResponseWriter, r *http.Request, err *AppError, cfg *errorHandlerConfig) {
 	ctx := r.Context()
-	logID := ""
-	if tracker := GetTracker(ctx); tracker != nil {
-		logID = tracker.LogID()
-	}
+	logID := EnsureLogID(ctx)
 
 	if cfg.onError != nil {
 		cfg.onError(r, err)

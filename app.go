@@ -30,7 +30,11 @@ func NewApp(opts ...ServiceOption) *App {
 
 	router := NewRouter(services)
 
-	router.Use(
+	defaultMiddlewares := []Middleware{}
+	if observabilityMiddleware := services.ObservabilityMiddleware(); observabilityMiddleware != nil {
+		defaultMiddlewares = append(defaultMiddlewares, observabilityMiddleware)
+	}
+	defaultMiddlewares = append(defaultMiddlewares,
 		ErrorHandlerMiddleware(
 			WithErrorCallback(func(r *http.Request, err *AppError) {
 				if services.logger != nil {
@@ -43,11 +47,14 @@ func NewApp(opts ...ServiceOption) *App {
 				}
 			}),
 		),
+	)
+	defaultMiddlewares = append(defaultMiddlewares,
 		LoggerAsMiddleware(services.logger, services.panicLogger),
-		TrackerMiddleware(),
+		LogIDMiddleware(),
 		TimeoutMiddleware(),
 		ContextAsMiddleware(),
 	)
+	router.Use(defaultMiddlewares...)
 
 	return &App{
 		Services: services,
@@ -90,7 +97,11 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 
 	router := NewRouter(services)
 
-	router.Use(
+	defaultMiddlewares := []Middleware{}
+	if observabilityMiddleware := services.ObservabilityMiddleware(); observabilityMiddleware != nil {
+		defaultMiddlewares = append(defaultMiddlewares, observabilityMiddleware)
+	}
+	defaultMiddlewares = append(defaultMiddlewares,
 		ErrorHandlerMiddleware(
 			WithErrorCallback(func(r *http.Request, err *AppError) {
 				services.logger.Warning(r.Context(), "request error: %d %s", err.Code, err.Message)
@@ -99,11 +110,14 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 				services.panicLogger.Report(r.Context(), recovered)
 			}),
 		),
+	)
+	defaultMiddlewares = append(defaultMiddlewares,
 		LoggerAsMiddleware(services.logger, services.panicLogger),
-		TrackerMiddleware(),
+		LogIDMiddleware(),
 		TimeoutMiddleware(),
 		ContextAsMiddleware(),
 	)
+	router.Use(defaultMiddlewares...)
 
 	if env.EnablePprof() {
 		router.MountPprof(PprofOptions{LoopbackOnly: true})
