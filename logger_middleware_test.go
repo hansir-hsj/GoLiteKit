@@ -2,8 +2,10 @@ package golitekit
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -21,7 +23,7 @@ func TestLoggerAsMiddleware_NilLogger(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
-	req = req.WithContext(WithContext(req.Context()))
+	req = req.WithContext(withContext(req.Context()))
 	rec := httptest.NewRecorder()
 
 	mw(inner).ServeHTTP(rec, req)
@@ -40,11 +42,44 @@ func TestLoggerAsMiddleware_ErrorPath(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
-	req = req.WithContext(WithContext(req.Context()))
+	req = req.WithContext(logger.WithLoggerContext(withContext(req.Context())))
 	rec := httptest.NewRecorder()
 
 	// Should not panic even when logger is nil and there is an error.
 	mw(inner).ServeHTTP(rec, req)
+}
+
+func TestLoggerAsMiddleware_RedactsInternalError(t *testing.T) {
+	mw := LoggerAsMiddleware(nil, nil)
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		return ErrInternal("database failed", errors.New("dsn password=secret123 token=abc123"))
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/submit", nil)
+	req = req.WithContext(logger.WithLoggerContext(withContext(req.Context())))
+	rec := httptest.NewRecorder()
+
+	mw(inner).ServeHTTP(rec, req)
+
+	logCtx := logger.GetLoggerContext(req.Context())
+	if logCtx == nil {
+		t.Fatal("logger context missing")
+	}
+	for node := logCtx.Head; node != nil; node = node.Next {
+		if node.Key != "err_internal" {
+			continue
+		}
+		value := node.Value.(string)
+		if strings.Contains(value, "secret123") || strings.Contains(value, "abc123") {
+			t.Fatalf("err_internal leaked sensitive value: %s", value)
+		}
+		if !strings.Contains(value, "[REDACTED]") {
+			t.Fatalf("err_internal was not redacted: %s", value)
+		}
+		return
+	}
+	t.Fatal("err_internal field missing")
 }
 
 func TestLoggerAsMiddleware_SuccessPath(t *testing.T) {
@@ -58,7 +93,7 @@ func TestLoggerAsMiddleware_SuccessPath(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/ok", nil)
-	req = req.WithContext(WithContext(req.Context()))
+	req = req.WithContext(withContext(req.Context()))
 	rec := httptest.NewRecorder()
 
 	mw(inner).ServeHTTP(rec, req)
@@ -81,7 +116,7 @@ func TestLoggerAsMiddleware_WithRealLogger(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/log", nil)
-	req = req.WithContext(WithContext(req.Context()))
+	req = req.WithContext(withContext(req.Context()))
 	rec := httptest.NewRecorder()
 
 	mw(inner).ServeHTTP(rec, req)
@@ -133,6 +168,97 @@ func TestLoggerRedactSensitiveKeys_CaseInsensitive(t *testing.T) {
 
 	if strings.Contains(result, "mypass") || strings.Contains(result, `"key"`) || strings.Contains(result, "Bearer") {
 		t.Fatalf("sensitive keys not redacted (case-insensitive): %s", result)
+	}
+}
+
+func TestLoggerRedactSensitiveKeys_NestedArrays(t *testing.T) {
+	input := `{"items":[{"username":"alice","access_token":"abc123"},{"profile":{"api_key":"key123","name":"bob"}}]}`
+	result := redactSensitiveKeys(input)
+
+	if strings.Contains(result, "abc123") || strings.Contains(result, "key123") {
+		t.Fatalf("sensitive values inside arrays were not redacted: %s", result)
+	}
+	if !strings.Contains(result, "alice") || !strings.Contains(result, "bob") {
+		t.Fatalf("non-sensitive values were redacted: %s", result)
+	}
+}
+
+func TestLoggerSanitizeBody_InvalidJSONOmitted(t *testing.T) {
+	input := []byte(`{"password":"secret123"`)
+	result := sanitizeLoggedBody(input, DefaultLogBodyLimit, "application/json")
+
+	if strings.Contains(result, "secret123") || strings.Contains(result, "password") {
+		t.Fatalf("invalid json body leaked original content: %s", result)
+	}
+}
+
+func TestLoggerSanitizeBody_RedactsBeforeTruncating(t *testing.T) {
+	input := []byte(`{"password":"secret123","padding":"` + strings.Repeat("x", 5000) + `"}`)
+	result := sanitizeLoggedBody(input, 64, "application/json")
+
+	if strings.Contains(result, "secret123") {
+		t.Fatalf("sensitive value leaked after truncation: %s", result)
+	}
+	if !strings.HasSuffix(result, "...(truncated)") {
+		t.Fatalf("expected sanitized output to be truncated: %s", result)
+	}
+}
+
+func TestLoggerSanitizeQuery_RedactsSensitiveValues(t *testing.T) {
+	values := url.Values{}
+	values.Set("token", "abc123")
+	values.Set("password", "secret123")
+	values.Set("page", "1")
+
+	result := sanitizeQuery(values)
+
+	if strings.Contains(result, "abc123") || strings.Contains(result, "secret123") {
+		t.Fatalf("query leaked sensitive values: %s", result)
+	}
+	if !strings.Contains(result, "page=1") {
+		t.Fatalf("non-sensitive query value missing: %s", result)
+	}
+}
+
+func TestLoggerSanitizeURL_RedactsQueryValues(t *testing.T) {
+	u, err := url.Parse("/login?token=abc123&page=1")
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+
+	result := sanitizeURL(u)
+
+	if strings.Contains(result, "abc123") {
+		t.Fatalf("url leaked sensitive query value: %s", result)
+	}
+	if !strings.HasPrefix(result, "/login?") || !strings.Contains(result, "page=1") {
+		t.Fatalf("url lost non-sensitive data: %s", result)
+	}
+}
+
+func TestLoggerSanitizeErrorMessage_RedactsSensitiveValues(t *testing.T) {
+	input := `database failed: password=secret123 token=abc123 authorization=Bearer xyz`
+	result := sanitizeErrorMessage(input, DefaultLogBodyLimit)
+
+	for _, leaked := range []string{"secret123", "abc123", "Bearer xyz"} {
+		if strings.Contains(result, leaked) {
+			t.Fatalf("error message leaked %q: %s", leaked, result)
+		}
+	}
+	if !strings.Contains(result, "database failed") {
+		t.Fatalf("non-sensitive context missing: %s", result)
+	}
+}
+
+func TestLoggerSanitizeResponseBody_RedactsJSON(t *testing.T) {
+	input := []byte(`{"data":{"refresh_token":"rt123","name":"alice"}}`)
+	result := sanitizeLoggedBody(input, DefaultLogBodyLimit, "application/json")
+
+	if strings.Contains(result, "rt123") {
+		t.Fatalf("response body leaked sensitive value: %s", result)
+	}
+	if !strings.Contains(result, "alice") {
+		t.Fatalf("non-sensitive response value missing: %s", result)
 	}
 }
 

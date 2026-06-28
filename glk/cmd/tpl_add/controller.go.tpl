@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 
 	kit "github.com/hansir-hsj/GoLiteKit"
 )
@@ -11,5 +12,5 @@ type {{.Name}}Controller struct {
 }
 
 func (c *{{.Name}}Controller) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"message": "ok"})
+	return c.JSON(http.StatusOK, map[string]string{"message": "ok"})
 }

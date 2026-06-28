@@ -4,13 +4,21 @@ import "net/http"
 
 // RouterGroup is a group of routes with shared prefix and middlewares.
 type RouterGroup struct {
-	router      *Router
-	prefix      string
-	middlewares MiddlewareQueue
+	router           *Router
+	prefix           string
+	middlewares      MiddlewareQueue
+	routesRegistered bool
+	childrenCreated  bool
 }
 
 // Use adds middlewares to this group.
 func (g *RouterGroup) Use(middlewares ...Middleware) *RouterGroup {
+	if g.routesRegistered {
+		panic("golitekit: group middleware must be registered before group routes")
+	}
+	if g.childrenCreated {
+		panic("golitekit: group middleware must be registered before nested groups or routes")
+	}
 	g.middlewares.Use(middlewares...)
 	return g
 }
@@ -28,14 +36,19 @@ func (g *RouterGroup) Any(path string, c any) {
 	g.POST(path, c)
 	g.PUT(path, c)
 	g.DELETE(path, c)
+	g.PATCH(path, c)
+	g.HEAD(path, c)
+	g.OPTIONS(path, c)
 }
 
 func (g *RouterGroup) handle(method, path string, c any) {
+	g.routesRegistered = true
 	g.router.handle(method, g.prefix+path, c, g.middlewares)
 }
 
 // Group creates a nested group inheriting parent middlewares.
 func (g *RouterGroup) Group(prefix string) *RouterGroup {
+	g.childrenCreated = true
 	return &RouterGroup{
 		router:      g.router,
 		prefix:      g.prefix + prefix,

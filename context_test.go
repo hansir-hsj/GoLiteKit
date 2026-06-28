@@ -4,14 +4,15 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 )
 
-func TestWithContext(t *testing.T) {
+func TestWithFrameworkContext(t *testing.T) {
 	t.Run("creates new context when none exists", func(t *testing.T) {
 		ctx := context.Background()
-		newCtx := WithContext(ctx)
+		newCtx := withContext(ctx)
 
 		gcx := GetContext(newCtx)
 		if gcx == nil {
@@ -25,10 +26,10 @@ func TestWithContext(t *testing.T) {
 
 	t.Run("reuses existing context", func(t *testing.T) {
 		ctx := context.Background()
-		ctx1 := WithContext(ctx)
+		ctx1 := withContext(ctx)
 		gcx1 := GetContext(ctx1)
 
-		ctx2 := WithContext(ctx1)
+		ctx2 := withContext(ctx1)
 		gcx2 := GetContext(ctx2)
 
 		if gcx1 != gcx2 {
@@ -47,7 +48,7 @@ func TestGetContext(t *testing.T) {
 	})
 
 	t.Run("returns Context when present", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 		gcx := GetContext(ctx)
 		if gcx == nil {
 			t.Error("expected Context to be returned")
@@ -55,9 +56,28 @@ func TestGetContext(t *testing.T) {
 	})
 }
 
+func TestRequestContextRemainsReadableAfterHandlerReturns(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/first", nil)
+	glkCtx := newContext(req)
+	ctx := req.WithContext(glkCtx).Context()
+	gcx := GetContext(ctx)
+	gcx.setContextOptions(withRequest(req))
+	SetContextData(ctx, "trace", "first")
+
+	if got := GetContext(ctx); got != gcx {
+		t.Fatal("request context should still resolve the original Context")
+	}
+	if gotReq := gcx.Request(); gotReq == nil || gotReq.URL.Path != "/first" {
+		t.Fatalf("request after handler return = %v, want /first", gotReq)
+	}
+	if value, ok := GetContextData(ctx, "trace"); !ok || value != "first" {
+		t.Fatalf("context data after handler return = %v, %v; want first, true", value, ok)
+	}
+}
+
 func TestSetContextData_GetContextData(t *testing.T) {
 	t.Run("stores and retrieves data", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 
 		SetContextData(ctx, "user_id", 12345)
 		val, ok := GetContextData(ctx, "user_id")
@@ -71,7 +91,7 @@ func TestSetContextData_GetContextData(t *testing.T) {
 	})
 
 	t.Run("returns false for non-existent key", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 
 		_, ok := GetContextData(ctx, "non_existent")
 		if ok {
@@ -80,7 +100,7 @@ func TestSetContextData_GetContextData(t *testing.T) {
 	})
 
 	t.Run("concurrent access is safe", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 		var wg sync.WaitGroup
 
 		for i := 0; i < 100; i++ {
@@ -105,15 +125,17 @@ func TestSetContextData_GetContextData(t *testing.T) {
 
 func TestContextAsMiddleware(t *testing.T) {
 	t.Run("writes JSON response", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 		gcx := GetContext(ctx)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
-		gcx.ServeJSON(map[string]string{"status": "ok"})
+		gcx.setContextOptions(withRequest(req), withResponseWriter(rec))
+		if err := gcx.JSON(http.StatusOK, map[string]string{"status": "ok"}); err != nil {
+			t.Fatalf("JSON failed: %v", err)
+		}
 
 		mw := ContextAsMiddleware()
 		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
@@ -130,15 +152,17 @@ func TestContextAsMiddleware(t *testing.T) {
 	})
 
 	t.Run("writes raw string response", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 		gcx := GetContext(ctx)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
-		gcx.ServeRawData("hello world")
+		gcx.setContextOptions(withRequest(req), withResponseWriter(rec))
+		if err := gcx.String(http.StatusOK, "hello world"); err != nil {
+			t.Fatalf("String failed: %v", err)
+		}
 
 		mw := ContextAsMiddleware()
 		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
@@ -155,15 +179,17 @@ func TestContextAsMiddleware(t *testing.T) {
 	})
 
 	t.Run("writes HTML response", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 		gcx := GetContext(ctx)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
-		gcx.ServeHTML("<h1>Hello</h1>")
+		gcx.setContextOptions(withRequest(req), withResponseWriter(rec))
+		if err := gcx.HTML(http.StatusOK, "<h1>Hello</h1>"); err != nil {
+			t.Fatalf("HTML failed: %v", err)
+		}
 
 		mw := ContextAsMiddleware()
 		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
@@ -177,15 +203,17 @@ func TestContextAsMiddleware(t *testing.T) {
 	})
 
 	t.Run("propagates error without writing response", func(t *testing.T) {
-		ctx := WithContext(context.Background())
+		ctx := withContext(context.Background())
 		gcx := GetContext(ctx)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req = req.WithContext(ctx)
 		rec := httptest.NewRecorder()
 
-		gcx.SetContextOptions(WithRequest(req), WithResponseWriter(rec))
-		gcx.ServeJSON(map[string]string{"status": "ok"})
+		gcx.setContextOptions(withRequest(req), withResponseWriter(rec))
+		if err := gcx.JSON(http.StatusOK, map[string]string{"status": "ok"}); err != nil {
+			t.Fatalf("JSON failed: %v", err)
+		}
 
 		mw := ContextAsMiddleware()
 		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
@@ -238,16 +266,16 @@ func TestSSEWriter(t *testing.T) {
 		if body == "" {
 			t.Error("expected non-empty body")
 		}
-		if !contains(body, "id: 123") {
+		if !strings.Contains(body, "id: 123") {
 			t.Error("expected id field")
 		}
-		if !contains(body, "event: message") {
+		if !strings.Contains(body, "event: message") {
 			t.Error("expected event field")
 		}
-		if !contains(body, "retry: 3000") {
+		if !strings.Contains(body, "retry: 3000") {
 			t.Error("expected retry field")
 		}
-		if !contains(body, "data: test data") {
+		if !strings.Contains(body, "data: test data") {
 			t.Error("expected data field")
 		}
 	})
@@ -262,7 +290,7 @@ func TestSSEWriter(t *testing.T) {
 		}
 
 		body := rec.Body.String()
-		if !contains(body, `{"count":42}`) {
+		if !strings.Contains(body, `{"count":42}`) {
 			t.Errorf("expected JSON data in body: %s", body)
 		}
 	})
@@ -280,28 +308,15 @@ func TestSSEWriter(t *testing.T) {
 	})
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func TestContextServiceStore(t *testing.T) {
+func TestContextServiceReadsStartupRegisteredService(t *testing.T) {
 	type fakeService struct{ Name string }
 
 	svc := &Services{}
+	WithService("fake", &fakeService{Name: "primary"})(svc)
 	r := newTestRouter()
 	r.services = svc
 
 	r.GET("/svc", func(ctx *Context) error {
-		ctx.SetService("fake", &fakeService{Name: "primary"})
 		got, ok := ctx.Service("fake").(*fakeService)
 		if !ok {
 			return ErrInternal("service type mismatch", nil)
@@ -309,8 +324,7 @@ func TestContextServiceStore(t *testing.T) {
 		if got.Name != "primary" {
 			return ErrInternal("service name mismatch", nil)
 		}
-		ctx.ServeJSON(map[string]string{"ok": "true"})
-		return nil
+		return ctx.JSON(http.StatusOK, map[string]string{"ok": "true"})
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/svc", nil)

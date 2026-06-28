@@ -16,7 +16,6 @@ import (
 // ============================================================================
 
 // makeRequest builds an httptest.Request and attaches a golitekit context.
-// The returned context is already wrapped with WithContext.
 func makeRequest(method, path string, body []byte, contentType string) (*http.Request, *httptest.ResponseRecorder, context.Context) {
 	var reqBody *bytes.Reader
 	if body != nil {
@@ -31,9 +30,9 @@ func makeRequest(method, path string, body []byte, contentType string) (*http.Re
 	}
 
 	rec := httptest.NewRecorder()
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	gcx.setContextOptions(withRequest(req.WithContext(ctx)), withResponseWriter(rec))
 	req = req.WithContext(ctx)
 	return req, rec, ctx
 }
@@ -51,7 +50,7 @@ func TestBaseController_Init_NoContext(t *testing.T) {
 	}
 }
 
-func TestBaseController_Init_WithContext(t *testing.T) {
+func TestBaseController_Init_WithFrameworkContext(t *testing.T) {
 	req, rec, ctx := makeRequest(http.MethodGet, "/", nil, "")
 	_ = ctx
 	c := &BaseController{}
@@ -70,8 +69,8 @@ func TestBaseController_Init_DoesNotParseBody(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	if len(c.gcx.RawBody) != 0 {
-		t.Fatalf("RawBody length = %d, want 0", len(c.gcx.RawBody))
+	if len(c.gcx.RawBody()) != 0 {
+		t.Fatalf("RawBody length = %d, want 0", len(c.gcx.RawBody()))
 	}
 	if c.Request != (jsonRequest{}) {
 		t.Fatalf("Request = %+v, want zero value", c.Request)
@@ -97,7 +96,7 @@ func TestBaseController_ParseRequest_JSON(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
 
@@ -118,16 +117,21 @@ func TestBaseController_ParseRequest_PopulatesRawBodyAndRequest(t *testing.T) {
 		t.Fatalf("Init: %v", err)
 	}
 
-	if len(c.gcx.RawBody) != 0 {
-		t.Fatalf("RawBody length before ParseRequest = %d, want 0", len(c.gcx.RawBody))
+	if len(c.gcx.RawBody()) != 0 {
+		t.Fatalf("RawBody length before ParseRequest = %d, want 0", len(c.gcx.RawBody()))
 	}
 
-	if err := c.ParseRequest(req.Context(), nil); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
 
-	if !bytes.Equal(c.gcx.RawBody, body) {
-		t.Fatalf("RawBody = %q, want %q", c.gcx.RawBody, body)
+	rawBody := c.gcx.RawBody()
+	if !bytes.Equal(rawBody, body) {
+		t.Fatalf("RawBody = %q, want %q", rawBody, body)
+	}
+	rawBody[0] = 'x'
+	if !bytes.Equal(c.gcx.RawBody(), body) {
+		t.Fatal("RawBody should return a copy")
 	}
 	if c.Request.Name != "alice" {
 		t.Errorf("Name = %q, want %q", c.Request.Name, "alice")
@@ -145,7 +149,7 @@ func TestBaseController_ParseRequest_NoBody(t *testing.T) {
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	if err := c.ParseRequest(req.Context(), []byte(`{"x":1}`)); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Errorf("unexpected error for NoBody controller: %v", err)
 	}
 }
@@ -158,7 +162,7 @@ func TestBaseController_ParseRequest_EmptyBody(t *testing.T) {
 	if err := c.Init(req.Context()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	if err := c.ParseRequest(req.Context(), nil); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Errorf("unexpected error for empty body: %v", err)
 	}
 }
@@ -206,9 +210,9 @@ func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	rec := httptest.NewRecorder()
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	gcx.setContextOptions(withRequest(req.WithContext(ctx)), withResponseWriter(rec))
 	req = req.WithContext(ctx)
 
 	c := &BaseControllerOf[formRequest]{}
@@ -217,7 +221,7 @@ func TestBaseController_ParseRequest_FormURLEncoded(t *testing.T) {
 	}
 
 	// ParseRequest calls ParseForm and binds directly from request.Form.
-	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
 
@@ -250,9 +254,9 @@ func TestBaseController_ParseRequest_MultipartForm(t *testing.T) {
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	rec := httptest.NewRecorder()
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	gcx.setContextOptions(withRequest(req.WithContext(ctx)), withResponseWriter(rec))
 	req = req.WithContext(ctx)
 
 	c := &BaseControllerOf[multipartRequest]{}
@@ -263,7 +267,7 @@ func TestBaseController_ParseRequest_MultipartForm(t *testing.T) {
 		t.Fatalf("req.MultipartForm = %v, want nil", req.MultipartForm)
 	}
 
-	if err := c.ParseRequest(req.Context(), nil); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
 
@@ -294,9 +298,9 @@ func TestSetFieldValue_PointerToString(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	rec := httptest.NewRecorder()
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	gcx.setContextOptions(withRequest(req.WithContext(ctx)), withResponseWriter(rec))
 	req = req.WithContext(ctx)
 
 	c := &BaseControllerOf[Req]{}
@@ -305,7 +309,7 @@ func TestSetFieldValue_PointerToString(t *testing.T) {
 	}
 
 	// ParseRequest handles form types by parsing the form before binding fields.
-	if err := c.ParseRequest(req.Context(), c.gcx.RawBody); err != nil {
+	if err := c.ParseRequest(req.Context()); err != nil {
 		t.Fatalf("ParseRequest: %v", err)
 	}
 
@@ -435,7 +439,7 @@ func TestBaseController_InternalError(t *testing.T) {
 }
 
 // ============================================================================
-// ServeJSON / ServeRawData
+// Response helpers
 // ============================================================================
 
 type serveController struct {
@@ -443,10 +447,10 @@ type serveController struct {
 }
 
 func (c *serveController) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"msg": "ok"})
+	return c.JSON(http.StatusOK, map[string]string{"msg": "ok"})
 }
 
-func TestBaseController_ServeJSON(t *testing.T) {
+func TestBaseController_JSON(t *testing.T) {
 	req, rec, _ := makeRequest(http.MethodGet, "/", nil, "")
 
 	r := newTestRouter()
@@ -455,4 +459,38 @@ func TestBaseController_ServeJSON(t *testing.T) {
 	r.Handler().ServeHTTP(rec, req)
 	// Just confirm no panic and the recorder was used.
 	_ = rec
+}
+
+func TestBaseController_ServiceReadsStartupRegisteredService(t *testing.T) {
+	svc := &Services{}
+	WithService("fake", &controllerFakeService{Name: "primary"})(svc)
+
+	r := newTestRouter()
+	r.services = svc
+	r.GET("/svc", &serviceController{})
+
+	req := httptest.NewRequest(http.MethodGet, "/svc", nil)
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+type serviceController struct {
+	BaseController
+}
+
+type controllerFakeService struct{ Name string }
+
+func (c *serviceController) Serve(ctx context.Context) error {
+	got, ok := c.Service("fake").(*controllerFakeService)
+	if !ok {
+		return ErrInternal("service type mismatch", nil)
+	}
+	if got.Name != "primary" {
+		return ErrInternal("service name mismatch", nil)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }

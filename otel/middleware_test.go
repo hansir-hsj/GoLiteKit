@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	glk "github.com/hansir-hsj/GoLiteKit"
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -17,6 +18,16 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	writeDeadline time.Time
+}
+
+func (r *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	r.writeDeadline = deadline
+	return nil
+}
 
 func TestMiddlewareCreatesRequestSpanAndInjectsLogFields(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
@@ -187,6 +198,19 @@ func TestMiddlewareKeepsFirstWriteHeaderStatus(t *testing.T) {
 		t.Fatalf("span status = %v, want %v", span.Status.Code, codes.Error)
 	}
 	assertSpanAttr(t, span.Attributes, string(semconv.HTTPResponseStatusCodeKey), int64(http.StatusInternalServerError))
+}
+
+func TestStatusCaptureUnwrapsForResponseController(t *testing.T) {
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	capture := &statusCapture{ResponseWriter: rec, statusCode: http.StatusOK}
+	deadline := time.Now().Add(time.Second)
+
+	if err := http.NewResponseController(capture).SetWriteDeadline(deadline); err != nil {
+		t.Fatalf("ResponseController.SetWriteDeadline: %v", err)
+	}
+	if !rec.writeDeadline.Equal(deadline) {
+		t.Fatalf("write deadline = %v, want %v", rec.writeDeadline, deadline)
+	}
 }
 
 func TestClientErrorAsSpanError(t *testing.T) {

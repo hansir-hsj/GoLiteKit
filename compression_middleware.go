@@ -38,12 +38,13 @@ func CompressionMiddleware(level ...int) Middleware {
 			gzw := &gzipResponseWriter{
 				ResponseWriter: w,
 				Writer:         gz,
+				bodyAllowed:    true,
 			}
 
 			err = next(ctx, gzw, r)
 
 			// Close flushes remaining data; errors may truncate the client response.
-			if closeErr := gz.Close(); closeErr != nil {
+			if closeErr := gzw.Close(); closeErr != nil {
 				fmt.Fprintf(os.Stderr, "gzip close error: %v\n", closeErr)
 			}
 
@@ -55,9 +56,13 @@ func CompressionMiddleware(level ...int) Middleware {
 type gzipResponseWriter struct {
 	http.ResponseWriter
 	io.Writer
+	bodyAllowed bool
 }
 
 func (w *gzipResponseWriter) Write(b []byte) (int, error) {
+	if !w.bodyAllowed {
+		return 0, http.ErrBodyNotAllowed
+	}
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", http.DetectContentType(b))
 	}
@@ -66,14 +71,28 @@ func (w *gzipResponseWriter) Write(b []byte) (int, error) {
 
 func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 	if statusCode == http.StatusNoContent || statusCode == http.StatusNotModified {
+		w.bodyAllowed = false
 		w.Header().Del("Content-Encoding")
 	}
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+func (w *gzipResponseWriter) Close() error {
+	if !w.bodyAllowed {
+		return nil
+	}
+	if closer, ok := w.Writer.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 // Flush flushes the gzip buffer first, then the underlying connection.
 func (w *gzipResponseWriter) Flush() {
 	if gz, ok := w.Writer.(*gzip.Writer); ok {
+		if !w.bodyAllowed {
+			return
+		}
 		if err := gz.Flush(); err != nil {
 			fmt.Fprintf(os.Stderr, "gzip flush error: %v\n", err)
 			return
@@ -90,4 +109,8 @@ func (w *gzipResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return hj.Hijack()
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support Hijack")
+}
+
+func (w *gzipResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }

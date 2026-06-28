@@ -1,10 +1,36 @@
 package golitekit
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
+
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	writeDeadline time.Time
+}
+
+func (r *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	r.writeDeadline = deadline
+	return nil
+}
+
+type hijackRecorder struct {
+	*httptest.ResponseRecorder
+	hijacked bool
+}
+
+func (r *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	r.hijacked = true
+	server, client := net.Pipe()
+	_ = client.Close()
+	return server, bufio.NewReadWriter(bufio.NewReader(server), bufio.NewWriter(server)), nil
+}
 
 func (d *deferredResponseWriter) Buffer() []byte {
 	d.mu.Lock()
@@ -22,6 +48,12 @@ func (d *deferredResponseWriter) IsCommitted() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.isCommitted
+}
+
+func (d *deferredResponseWriter) IsHijacked() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.isHijacked
 }
 
 func TestDeferredResponseWriter_Write(t *testing.T) {
@@ -64,6 +96,33 @@ func TestDeferredResponseWriter_Write(t *testing.T) {
 
 		if rec.Body.String() != "direct" {
 			t.Errorf("body = %s, want direct", rec.Body.String())
+		}
+	})
+
+	t.Run("commits and passes through when buffer limit exceeded", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		dw := newDeferredResponseWriter(rec)
+
+		large := make([]byte, DefaultDeferredResponseBufferLimit+1)
+		for i := range large {
+			large[i] = 'a'
+		}
+
+		n, err := dw.Write(large)
+		if err != nil {
+			t.Fatalf("Write failed: %v", err)
+		}
+		if n != len(large) {
+			t.Fatalf("bytes written = %d, want %d", n, len(large))
+		}
+		if !dw.IsCommitted() {
+			t.Fatal("writer should commit after buffer limit is exceeded")
+		}
+		if rec.Body.Len() != len(large) {
+			t.Fatalf("body length = %d, want %d", rec.Body.Len(), len(large))
+		}
+		if len(dw.Buffer()) != 0 {
+			t.Fatalf("buffer length = %d, want 0 after pass-through", len(dw.Buffer()))
 		}
 	})
 }
@@ -239,8 +298,62 @@ func TestDeferredResponseWriter_Flush_CommitsOnFirstCall(t *testing.T) {
 	if rec.Header().Get("Content-Type") != "text/event-stream" {
 		t.Errorf("Content-Type = %q, want text/event-stream", rec.Header().Get("Content-Type"))
 	}
-	if !containsStr(rec.Body.String(), "data: hello") {
+	if !strings.Contains(rec.Body.String(), "data: hello") {
 		t.Errorf("body = %q, expected SSE data", rec.Body.String())
+	}
+}
+
+func TestDeferredResponseWriter_ResponseControllerFlush(t *testing.T) {
+	fr := &flushableRecorder{ResponseRecorder: httptest.NewRecorder()}
+	dw := newDeferredResponseWriter(fr)
+
+	if err := http.NewResponseController(dw).Flush(); err != nil {
+		t.Fatalf("ResponseController.Flush: %v", err)
+	}
+	if fr.flushCount == 0 {
+		t.Fatal("expected flush to reach underlying writer")
+	}
+}
+
+func TestDeferredResponseWriter_ResponseControllerSetWriteDeadline(t *testing.T) {
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	dw := newDeferredResponseWriter(rec)
+	deadline := time.Now().Add(time.Second)
+
+	if err := http.NewResponseController(dw).SetWriteDeadline(deadline); err != nil {
+		t.Fatalf("ResponseController.SetWriteDeadline: %v", err)
+	}
+	if !rec.writeDeadline.Equal(deadline) {
+		t.Fatalf("write deadline = %v, want %v", rec.writeDeadline, deadline)
+	}
+}
+
+func TestDeferredResponseWriter_CommitSkippedAfterHijack(t *testing.T) {
+	rec := &hijackRecorder{ResponseRecorder: httptest.NewRecorder()}
+	dw := newDeferredResponseWriter(rec)
+	dw.WriteHeader(http.StatusCreated)
+	dw.Write([]byte("buffered"))
+
+	conn, _, err := dw.Hijack()
+	if err != nil {
+		t.Fatalf("Hijack: %v", err)
+	}
+	_ = conn.Close()
+
+	if !rec.hijacked {
+		t.Fatal("expected underlying writer to be hijacked")
+	}
+	if !dw.IsHijacked() {
+		t.Fatal("expected deferred writer to record hijacked state")
+	}
+	if err := dw.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want untouched recorder status %d", rec.Code, http.StatusOK)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body = %q, want no commit after hijack", rec.Body.String())
 	}
 }
 
@@ -253,7 +366,7 @@ func TestDeferredResponseWriter_Flush_PassThrough(t *testing.T) {
 
 	dw.Write([]byte("streaming chunk"))
 
-	if !containsStr(rec.Body.String(), "streaming chunk") {
+	if !strings.Contains(rec.Body.String(), "streaming chunk") {
 		t.Errorf("body = %q, expected pass-through write", rec.Body.String())
 	}
 }
@@ -274,24 +387,12 @@ func TestDeferredResponseWriter_Reset_IgnoredAfterFlush(t *testing.T) {
 	}
 }
 
-func containsStr(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-			return false
-		}())
-}
-
 // ============================================================================
 
 func TestResponseCapture(t *testing.T) {
 	t.Run("captures response body", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		rc := newResponseCapture(rec)
+		rc := newResponseCapture(rec, true, DefaultLogBodyLimit)
 
 		rc.Write([]byte("hello"))
 		rc.Write([]byte(" world"))
@@ -308,7 +409,7 @@ func TestResponseCapture(t *testing.T) {
 
 	t.Run("captures status code", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		rc := newResponseCapture(rec)
+		rc := newResponseCapture(rec, true, DefaultLogBodyLimit)
 
 		rc.WriteHeader(http.StatusNotFound)
 
@@ -324,10 +425,64 @@ func TestResponseCapture(t *testing.T) {
 
 	t.Run("default status is 200", func(t *testing.T) {
 		rec := httptest.NewRecorder()
-		rc := newResponseCapture(rec)
+		rc := newResponseCapture(rec, true, DefaultLogBodyLimit)
 
 		if rc.statusCode != http.StatusOK {
 			t.Errorf("default status = %d, want %d", rc.statusCode, http.StatusOK)
 		}
 	})
+
+	t.Run("captures response body up to limit", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		rc := newResponseCapture(rec, true, 4)
+
+		rc.Write([]byte("hello"))
+		rc.Write([]byte(" world"))
+
+		if string(rc.body) != "hell" {
+			t.Errorf("captured body = %q, want hell", string(rc.body))
+		}
+		if rec.Body.String() != "hello world" {
+			t.Errorf("original body = %q, want full response", rec.Body.String())
+		}
+	})
+
+	t.Run("does not capture response body when disabled", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		rc := newResponseCapture(rec, false, DefaultLogBodyLimit)
+
+		rc.Write([]byte("hello"))
+
+		if len(rc.body) != 0 {
+			t.Errorf("captured body length = %d, want 0", len(rc.body))
+		}
+		if rec.Body.String() != "hello" {
+			t.Errorf("original body = %q, want hello", rec.Body.String())
+		}
+	})
+}
+
+func TestResponseCapture_ResponseControllerFlush(t *testing.T) {
+	fr := &flushableRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rc := newResponseCapture(fr, false, DefaultLogBodyLimit)
+
+	if err := http.NewResponseController(rc).Flush(); err != nil {
+		t.Fatalf("ResponseController.Flush: %v", err)
+	}
+	if fr.flushCount == 0 {
+		t.Fatal("expected flush to reach underlying writer")
+	}
+}
+
+func TestResponseCapture_ResponseControllerSetWriteDeadline(t *testing.T) {
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	rc := newResponseCapture(rec, false, DefaultLogBodyLimit)
+	deadline := time.Now().Add(time.Second)
+
+	if err := http.NewResponseController(rc).SetWriteDeadline(deadline); err != nil {
+		t.Fatalf("ResponseController.SetWriteDeadline: %v", err)
+	}
+	if !rec.writeDeadline.Equal(deadline) {
+		t.Fatalf("write deadline = %v, want %v", rec.writeDeadline, deadline)
+	}
 }

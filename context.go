@@ -16,36 +16,13 @@ import (
 
 const globalContextKey ContextKey = iota
 
-// reset clears all request-scoped fields so the instance can be reused from the pool.
-func (gcx *Context) reset() {
-	gcx.request = nil
-	gcx.RawBody = nil
-	gcx.responseWriter = nil
-	gcx.logger = nil
-	gcx.panicLogger = nil
-	gcx.services = nil
-	gcx.rawResponse = nil
-	gcx.jsonResponse = nil
-	gcx.rawHtml = ""
-	gcx.statusCode = 0
-	gcx.sseWriter = nil
-	gcx.logID = ""
-	for k := range gcx.data {
-		delete(gcx.data, k)
-	}
-}
-
-// glkContext is a pooled context that embeds both the GoLiteKit Context and the
-// logger's LoggerContext by value, avoiding two context.WithValue allocations
-// per request.
+// glkContext embeds both the GoLiteKit Context and the logger's LoggerContext
+// by value, avoiding context.WithValue chain overhead for framework-owned keys.
 type glkContext struct {
 	parent    context.Context
 	gcx       Context              // embedded by value — no separate allocation
 	loggerCtx logger.LoggerContext // embedded by value — no separate allocation
 }
-
-// glkCtxPool reuses *glkContext (and its embedded structs) across requests.
-var glkCtxPool = sync.Pool{New: func() any { return &glkContext{} }}
 
 func (c *glkContext) Deadline() (time.Time, bool) { return c.parent.Deadline() }
 func (c *glkContext) Done() <-chan struct{}       { return c.parent.Done() }
@@ -62,22 +39,10 @@ func (c *glkContext) Value(key any) any {
 	return c.parent.Value(key)
 }
 
-// release resets all embedded contexts and returns c to the pool.
-func (c *glkContext) release() {
-	c.parent = nil
-	c.gcx.reset()
-	c.loggerCtx.Reset()
-	glkCtxPool.Put(c)
-}
-
-// newContext retrieves a *glkContext from the pool and attaches the request's
-// parent context. The caller must call glkCtx.release() after the request.
+// newContext creates a request-owned context wrapper and attaches the request's
+// parent context.
 func newContext(r *http.Request) *glkContext {
-	gctx := glkCtxPool.Get().(*glkContext)
-	gctx.parent = r.Context()
-	gctx.gcx.reset()
-	gctx.loggerCtx.Reset()
-	return gctx
+	return &glkContext{parent: r.Context()}
 }
 
 type ContextKey int
@@ -87,7 +52,7 @@ type ContextOption func(*Context)
 // Context holds request-scoped data for a single HTTP request.
 type Context struct {
 	request        *http.Request
-	RawBody        []byte
+	rawBody        []byte
 	responseWriter http.ResponseWriter
 
 	logger      logger.Logger
@@ -133,7 +98,7 @@ func GetContext(ctx context.Context) *Context {
 	return nil
 }
 
-func WithContext(ctx context.Context) context.Context {
+func withContext(ctx context.Context) context.Context {
 	gcx := GetContext(ctx)
 	if gcx == nil {
 		gcx = &Context{}
@@ -179,20 +144,20 @@ func GetContextData(ctx context.Context, key string) (any, bool) {
 	return nil, false
 }
 
-func (gcx *Context) SetContextOptions(opts ...ContextOption) *Context {
+func (gcx *Context) setContextOptions(opts ...ContextOption) *Context {
 	for _, opt := range opts {
 		opt(gcx)
 	}
 	return gcx
 }
 
-func WithRequest(r *http.Request) ContextOption {
+func withRequest(r *http.Request) ContextOption {
 	return func(gcx *Context) {
 		gcx.request = r
 	}
 }
 
-func WithResponseWriter(w http.ResponseWriter) ContextOption {
+func withResponseWriter(w http.ResponseWriter) ContextOption {
 	return func(gcx *Context) {
 		gcx.responseWriter = w
 	}
@@ -212,6 +177,16 @@ func withPanicLogger(pl *logger.PanicLogger) ContextOption {
 
 func (ctx *Context) Request() *http.Request {
 	return ctx.request
+}
+
+// RawBody returns a copy of the parsed request body.
+func (ctx *Context) RawBody() []byte {
+	if len(ctx.rawBody) == 0 {
+		return nil
+	}
+	body := make([]byte, len(ctx.rawBody))
+	copy(body, ctx.rawBody)
+	return body
 }
 
 func (ctx *Context) ResponseWriter() http.ResponseWriter {
@@ -240,35 +215,28 @@ func (ctx *Context) Redis() *redis.Client {
 	return ctx.services.Redis()
 }
 
-// SetService stores a named service in the app-level registry.
-func (ctx *Context) SetService(key string, value any) {
-	if ctx.services != nil {
-		ctx.services.Set(key, value)
-	}
-}
-
-// Service retrieves a named service from the app-level registry.
+// Service retrieves a startup-registered custom service.
 func (ctx *Context) Service(key string) any {
 	if ctx.services == nil {
 		return nil
 	}
-	return ctx.services.Get(key)
+	return ctx.services.customService(key)
 }
 
-func (ctx *Context) ServeRawData(data any) {
+func (ctx *Context) setRawResponse(data any) {
 	ctx.rawResponse = data
 }
 
-func (ctx *Context) ServeJSON(data any) {
+func (ctx *Context) setJSONResponse(data any) {
 	ctx.jsonResponse = data
 }
 
-func (ctx *Context) ServeHTML(html string) {
+func (ctx *Context) setHTMLResponse(html string) {
 	ctx.rawHtml = html
 }
 
 // ContextAsMiddleware writes the buffered response stored in Context (via
-// ServeJSON / ServeRawData / ServeHTML) after the inner handler returns.
+// JSON / String / HTML) after the inner handler returns.
 // Errors returned by the inner handler are propagated without writing a response.
 func ContextAsMiddleware() Middleware {
 	return func(next Handler) Handler {
@@ -435,25 +403,27 @@ func (ctx *Context) JSON(code int, data any) error {
 		return err
 	}
 	ctx.statusCode = code
-	ctx.jsonResponse = jsonData
+	ctx.setJSONResponse(jsonData)
 	return nil
 }
 
 // String writes plain text response with status code.
 func (ctx *Context) String(code int, s string) error {
 	ctx.statusCode = code
-	ctx.rawResponse = s
+	ctx.setRawResponse(s)
+	return nil
+}
+
+// Bytes writes binary response with status code.
+func (ctx *Context) Bytes(code int, data []byte) error {
+	ctx.statusCode = code
+	ctx.setRawResponse(data)
 	return nil
 }
 
 // HTML writes HTML response with status code.
 func (ctx *Context) HTML(code int, html string) error {
 	ctx.statusCode = code
-	ctx.rawHtml = html
+	ctx.setHTMLResponse(html)
 	return nil
-}
-
-// Services returns the service container.
-func (ctx *Context) Services() *Services {
-	return ctx.services
 }

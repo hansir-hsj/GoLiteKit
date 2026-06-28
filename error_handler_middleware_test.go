@@ -19,7 +19,7 @@ func TestErrorHandlerMiddleware_AppError(t *testing.T) {
 		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
-		req = req.WithContext(WithContext(req.Context()))
+		req = req.WithContext(withContext(req.Context()))
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req)
@@ -53,11 +53,11 @@ func TestErrorHandlerMiddleware_AppError(t *testing.T) {
 			wantCode int
 		}{
 			{"BadRequest", ErrBadRequest("bad", nil), http.StatusBadRequest},
-			{"Unauthorized", ErrUnauthorized("unauth"), http.StatusUnauthorized},
-			{"Forbidden", ErrForbidden("forbidden"), http.StatusForbidden},
-			{"NotFound", ErrNotFound("not found"), http.StatusNotFound},
-			{"Conflict", ErrConflict("conflict"), http.StatusConflict},
-			{"TooManyRequests", ErrTooManyRequests("rate limit"), http.StatusTooManyRequests},
+			{"Unauthorized", ErrUnauthorized("unauth", nil), http.StatusUnauthorized},
+			{"Forbidden", ErrForbidden("forbidden", nil), http.StatusForbidden},
+			{"NotFound", ErrNotFound("not found", nil), http.StatusNotFound},
+			{"Conflict", ErrConflict("conflict", nil), http.StatusConflict},
+			{"TooManyRequests", ErrTooManyRequests("rate limit", nil), http.StatusTooManyRequests},
 			{"Internal", ErrInternal("internal", nil), http.StatusInternalServerError},
 		}
 
@@ -72,7 +72,7 @@ func TestErrorHandlerMiddleware_AppError(t *testing.T) {
 				wrapped := mw(inner)
 
 				req := httptest.NewRequest("GET", "/test", nil)
-				req = req.WithContext(WithContext(req.Context()))
+				req = req.WithContext(withContext(req.Context()))
 				rec := httptest.NewRecorder()
 
 				wrapped.ServeHTTP(rec, req)
@@ -96,7 +96,7 @@ func TestErrorHandlerMiddleware_Panic(t *testing.T) {
 		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
-		req = req.WithContext(WithContext(req.Context()))
+		req = req.WithContext(withContext(req.Context()))
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req)
@@ -133,7 +133,7 @@ func TestErrorHandlerMiddleware_Panic(t *testing.T) {
 		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/callback-test", nil)
-		req = req.WithContext(WithContext(req.Context()))
+		req = req.WithContext(withContext(req.Context()))
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req)
@@ -161,7 +161,7 @@ func TestErrorHandlerMiddleware_NoError(t *testing.T) {
 		wrapped := mw(inner)
 
 		req := httptest.NewRequest("POST", "/test", nil)
-		req = req.WithContext(WithContext(req.Context()))
+		req = req.WithContext(withContext(req.Context()))
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req)
@@ -191,13 +191,13 @@ func TestErrorHandlerMiddleware_CustomFormatter(t *testing.T) {
 		)
 
 		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-			return ErrNotFound("item not found")
+			return ErrNotFound("item not found", nil)
 		})
 
 		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
-		req = req.WithContext(WithContext(req.Context()))
+		req = req.WithContext(withContext(req.Context()))
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req)
@@ -230,7 +230,7 @@ func TestErrorHandlerMiddleware_ErrorCallback(t *testing.T) {
 		wrapped := mw(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
-		req = req.WithContext(WithContext(req.Context()))
+		req = req.WithContext(withContext(req.Context()))
 		rec := httptest.NewRecorder()
 
 		wrapped.ServeHTTP(rec, req)

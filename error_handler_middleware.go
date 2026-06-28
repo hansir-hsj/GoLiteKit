@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"sync"
 )
 
 type errorHandlerConfig struct {
@@ -36,16 +35,6 @@ func WithPanicCallback(f func(r *http.Request, recovered any)) ErrorHandlerOptio
 	}
 }
 
-// deferredWriterPool reuses deferredResponseWriter allocations across requests.
-var deferredWriterPool = sync.Pool{
-	New: func() any {
-		return &deferredResponseWriter{
-			header:     make(http.Header),
-			statusCode: http.StatusOK,
-		}
-	},
-}
-
 // ErrorHandlerMiddleware is the outermost middleware. It catches errors returned
 // by inner handlers and panics, writing appropriate JSON responses.
 func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
@@ -58,13 +47,7 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
 
 	return func(next Handler) Handler {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-			dw := deferredWriterPool.Get().(*deferredResponseWriter)
-			dw.ResponseWriter = w
-
-			defer func() {
-				dw.resetForPool()
-				deferredWriterPool.Put(dw)
-			}()
+			dw := newDeferredResponseWriter(w)
 
 			defer func() {
 				if p := recover(); p != nil {

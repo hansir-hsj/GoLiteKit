@@ -23,25 +23,26 @@ func (r *Router) MountPprof(opts ...PprofOptions) {
 		opt.Prefix = "/debug/pprof"
 	}
 
-	wrap := func(h http.HandlerFunc) http.HandlerFunc {
+	wrap := func(h http.HandlerFunc) http.Handler {
 		if !opt.LoopbackOnly {
-			return h
+			return r.wrapHTTPHandler(h)
 		}
-		return func(w http.ResponseWriter, r *http.Request) {
-			if !isLoopback(r) {
+		return r.wrapHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if !isLoopback(req) {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
-			h(w, r)
-		}
+			h(w, req)
+		}))
 	}
 
+	r.routesRegistered = true
 	prefix := strings.TrimRight(opt.Prefix, "/")
-	r.mux.HandleFunc(prefix+"/", wrap(pprof.Index))
-	r.mux.HandleFunc(prefix+"/cmdline", wrap(pprof.Cmdline))
-	r.mux.HandleFunc(prefix+"/profile", wrap(pprof.Profile))
-	r.mux.HandleFunc(prefix+"/symbol", wrap(pprof.Symbol))
-	r.mux.HandleFunc(prefix+"/trace", wrap(pprof.Trace))
+	r.mux.Handle(prefix+"/", wrap(pprof.Index))
+	r.mux.Handle(prefix+"/cmdline", wrap(pprof.Cmdline))
+	r.mux.Handle(prefix+"/profile", wrap(pprof.Profile))
+	r.mux.Handle(prefix+"/symbol", wrap(pprof.Symbol))
+	r.mux.Handle(prefix+"/trace", wrap(pprof.Trace))
 }
 
 func isLoopback(r *http.Request) bool {

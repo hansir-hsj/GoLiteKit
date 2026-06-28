@@ -14,9 +14,38 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Request lifecycle now supports observability wrapping ErrorHandler so spans and metrics see final handled response status.
+- Router now creates a fresh controller instance per request from the registered prototype instead of pooling controller instances, preventing request-scoped fields from leaking across requests.
+- Router now rejects non-pointer controller values with a clear panic message; register controllers as pointers to structs.
+- RateLimiter now applies a default per-key TTL and maximum key capacity to prevent unbounded per-key limiter growth.
+- Rate limiter middleware now returns `429` when the per-key capacity limit is exhausted.
+- `NewServer` now fills zero-valued timeout and header-limit fields from `DefaultServerConfig`, and default config includes `ReadHeaderTimeout`.
+- Request context wrappers are no longer pooled, so context values captured by request goroutines remain readable after the handler returns.
+- Response logging now captures only the configured body-log prefix, and ErrorHandler response buffering now has a default size limit before switching to pass-through writes.
+- `NewAppFromConfig` now snapshots logger and timeout middleware options at construction time instead of reading mutable global env on each request.
+- `env.Init` and env getters are now safe for concurrent config reloads and reads.
+- Controller request state now tracks middleware-updated request contexts before lifecycle hooks run.
+- Router and RouterGroup now reject middleware registration after routes, static files, pprof endpoints, or nested groups are registered, making prebuilt middleware-chain ordering explicit.
+- Static file and pprof handlers now run through the current middleware chain captured at registration time.
+- ResponseWriter wrappers now expose `Unwrap()` so `http.ResponseController` can reach underlying writer capabilities.
+- `Server.Start` now exposes the background serve result through `Server.Done()`.
+- `App.ListenAndServe` now returns if the background server exits unexpectedly instead of waiting only for context cancellation.
+- `Server.Start` now rejects repeated starts while the server is already running.
+- Custom services are now startup-registered through `WithService` and read-only during request handling.
+- HandlerFunc routes now use a direct lightweight route path instead of being adapted into controller lifecycle instances.
+- Logger and timeout middleware no longer read global env during request handling; pass explicit options or use `NewAppFromConfig` for config snapshots.
+
+### Fixed
+- Gzip compression no longer writes an empty gzip stream for `204 No Content` or `304 Not Modified` responses.
+- `App.Start` now clears the current server after background `Serve` exits, allowing a later restart.
+- Method-not-allowed catch-all handlers now run through the current middleware chain.
+- Internal error strings added to request logs are now redacted for common secret-bearing key/value patterns.
+- Deferred response writing now skips commit after a successful connection hijack.
 
 ### Removed
 - Removed the old `Tracker` public API. Use `StartSpan(ctx, name, attrs...)` instead.
+- Removed `ControllerWrapper`, `WrapFunc`, and `WrapHandler`; register `HandlerFunc` / `func(*Context) error` directly or use a standard controller.
+- Removed request-time custom service mutation via `Context.SetService`.
+- Removed `App.Run(addr)`, `App.RunWithConfig`, `App.RunFromEnv`, and `Server.Run`; use `ListenAndServe(ctx, config)` or `Start`/`Shutdown` for explicit lifecycle control.
 
 ---
 
@@ -25,7 +54,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ### Changed
 - Controller lifecycle now runs request parsing before validation: `Init → ParseRequest → Validate → Serve → Finalize`.
 - `BaseControllerOf.Init` no longer reads or parses request bodies; parsing is owned by `ParseRequest`.
-- Custom `RequestParser` implementations now own request parsing and should not rely on a prepopulated body argument.
+- Custom `RequestParser` implementations now own request parsing from the request/context.
 
 ---
 
@@ -33,7 +62,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **HandlerFunc routes**: lightweight `func(*Context) error` handlers as an alternative to controllers.
-- **Generic service registry**: `Services.Set(key, value)` / `Services.Get(key)` for custom dependencies beyond DB/Redis.
+- **Custom services**: `WithService(key, value)` for startup-registered custom dependencies beyond DB/Redis.
 - **Context-aware server lifecycle**: `Start()` (non-blocking), `ListenAndServe(ctx)` (blocks until context cancelled, then graceful shutdown).
 - **Protected pprof mounting**: `MountPprof()` with optional `LoopbackOnly` restriction.
 - **Safe body logging**: request/response body logging with configurable `MaxBodyBytes` truncation and sensitive field redaction.

@@ -8,11 +8,17 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const (
+	DefaultRateLimiterTTL     = 10 * time.Minute
+	DefaultRateLimiterMaxKeys = 10000
+)
+
 type RateLimiterOptions struct {
 	EnableGlobal bool
 	GlobalRate   rate.Limit
 	GlobalBurst  int
 	TTL          time.Duration
+	MaxKeys      int
 }
 
 type RateLimiterOption func(*RateLimiterOptions)
@@ -31,6 +37,18 @@ func WithTTL(ttl time.Duration) RateLimiterOption {
 	}
 }
 
+func WithoutTTL() RateLimiterOption {
+	return func(opts *RateLimiterOptions) {
+		opts.TTL = -1
+	}
+}
+
+func WithMaxKeys(max int) RateLimiterOption {
+	return func(opts *RateLimiterOptions) {
+		opts.MaxKeys = max
+	}
+}
+
 type limiterEntry struct {
 	limiter  *rate.Limiter
 	lastUsed atomic.Int64
@@ -43,6 +61,7 @@ type RateLimiter struct {
 	rate          rate.Limit
 	burst         int
 	ttl           time.Duration
+	maxKeys       int
 	enableGlobal  bool
 	cleanCounter  atomic.Int64
 }
@@ -53,12 +72,23 @@ func NewRateLimiter(rat rate.Limit, burst int, opts ...RateLimiterOption) *RateL
 	for _, opt := range opts {
 		opt(&options)
 	}
+	ttl := options.TTL
+	if ttl == 0 {
+		ttl = DefaultRateLimiterTTL
+	} else if ttl < 0 {
+		ttl = 0
+	}
+	maxKeys := options.MaxKeys
+	if maxKeys <= 0 {
+		maxKeys = DefaultRateLimiterMaxKeys
+	}
 
 	r := &RateLimiter{
 		limiters:     make(map[string]*limiterEntry),
 		rate:         rat,
 		burst:        burst,
-		ttl:          options.TTL,
+		ttl:          ttl,
+		maxKeys:      maxKeys,
 		enableGlobal: options.EnableGlobal,
 	}
 	if options.EnableGlobal {
@@ -68,17 +98,19 @@ func NewRateLimiter(rat rate.Limit, burst int, opts ...RateLimiterOption) *RateL
 	return r
 }
 
-func (r *RateLimiter) GetLimiter(key string) *rate.Limiter {
+func (r *RateLimiter) limiterForKey(key string) (*rate.Limiter, bool) {
+	now := time.Now().UnixNano()
+
 	r.mu.RLock()
 	entry, exists := r.limiters[key]
 	if exists {
-		entry.lastUsed.Store(time.Now().UnixNano())
+		entry.lastUsed.Store(now)
 		r.mu.RUnlock()
 
 		if r.ttl > 0 && r.cleanCounter.Add(1)%1000 == 0 {
 			go r.cleanExpired()
 		}
-		return entry.limiter
+		return entry.limiter, true
 	}
 	r.mu.RUnlock()
 
@@ -87,24 +119,39 @@ func (r *RateLimiter) GetLimiter(key string) *rate.Limiter {
 
 	entry, exists = r.limiters[key]
 	if exists {
-		entry.lastUsed.Store(time.Now().UnixNano())
-		return entry.limiter
+		entry.lastUsed.Store(now)
+		return entry.limiter, true
+	}
+
+	if len(r.limiters) >= r.maxKeys {
+		if r.ttl > 0 {
+			r.cleanExpiredLocked(now)
+		}
+		if len(r.limiters) >= r.maxKeys {
+			return nil, false
+		}
 	}
 
 	entry = &limiterEntry{
 		limiter: rate.NewLimiter(r.rate, r.burst),
 	}
-	entry.lastUsed.Store(time.Now().UnixNano())
+	entry.lastUsed.Store(now)
 	r.limiters[key] = entry
 
-	return entry.limiter
+	return entry.limiter, true
 }
 
 func (r *RateLimiter) cleanExpired() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	now := time.Now().UnixNano()
+	r.cleanExpiredLocked(time.Now().UnixNano())
+}
+
+func (r *RateLimiter) cleanExpiredLocked(now int64) {
+	if r.ttl <= 0 {
+		return
+	}
 	ttlNanos := r.ttl.Nanoseconds()
 
 	for key, entry := range r.limiters {

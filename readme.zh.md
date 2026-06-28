@@ -24,7 +24,7 @@
 - **内置中间件** — 日志、错误处理、超时、限流、gzip 压缩、log ID
 - **可观测性** — 可选 OpenTelemetry 适配器，支持请求 span、业务 span 和 metrics
 - **结构化日志** — 基于 `slog`，支持请求体日志（截断和脱敏）、日志轮转
-- **服务注册表** — DB、Redis、Logger 通过 functional options 注入 + 通用 `Set/Get` 支持自定义服务
+- **自定义服务** — DB、Redis、Logger 通过 functional options 注入，并支持启动期注册自定义依赖
 - **优雅生命周期** — `Start`、`ListenAndServe`（上下文感知）、`Shutdown` 可配置超时
 - **Pprof 挂载** — 受保护的 pprof 端点，可选仅限本地回环访问
 - **glk 脚手架** — 使用 `glk new` 快速创建项目
@@ -44,6 +44,9 @@ package main
 
 import (
     "context"
+    "net/http"
+    "os"
+    "os/signal"
 
     glk "github.com/hansir-hsj/GoLiteKit"
 )
@@ -53,13 +56,17 @@ type HelloController struct {
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {
-    return c.ServeJSON(map[string]string{"message": "hello, world"})
+    return c.JSON(http.StatusOK, map[string]string{"message": "hello, world"})
 }
 
 func main() {
     app := glk.NewApp()
     app.GET("/hello", &HelloController{})
-    app.Run(":8080")
+
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+    defer stop()
+
+    app.ListenAndServe(ctx, glk.ServerConfig{Addr: ":8080"})
 }
 ```
 
@@ -86,7 +93,7 @@ type CreateUserController struct {
 func (c *CreateUserController) Serve(ctx context.Context) error {
     req := c.GetRequest()
     // req.Name, req.Email, req.Age 已自动填充
-    return c.ServeJSON(map[string]any{"created": req.Name})
+    return c.JSON(http.StatusOK, map[string]any{"created": req.Name})
 }
 ```
 
@@ -99,6 +106,8 @@ Init → ParseRequest → Validate → Serve → Finalize
 ```
 
 `ParseRequest` 会在 `Validate` 之前绑定 JSON/form/multipart 数据，因此校验逻辑可以安全读取 `c.GetRequest()` 或 `c.Request`。认证、feature flag 等解析前检查建议放在 middleware 或 `Init`。
+
+每个请求都会从注册时的 controller 原型复制出一个新实例。原型上适合保存不可变路由配置或依赖引用；请求级状态应只保存在每次请求的新实例上。
 
 ## REST 控制器
 
@@ -154,7 +163,7 @@ type GetUserController struct {
 
 func (c *GetUserController) Serve(ctx context.Context) error {
     id := c.PathValueInt("id", 0)
-    return c.ServeJSON(map[string]int{"id": id})
+    return c.JSON(http.StatusOK, map[string]int{"id": id})
 }
 ```
 
@@ -165,7 +174,7 @@ func (c *GetUserController) Serve(ctx context.Context) error {
 func AuthMiddleware(next glk.Handler) glk.Handler {
     return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
         if r.Header.Get("Authorization") == "" {
-            return glk.ErrUnauthorized("missing token")
+            return glk.ErrUnauthorized("missing token", nil)
         }
         return next(ctx, w, r)
     }
@@ -173,12 +182,15 @@ func AuthMiddleware(next glk.Handler) glk.Handler {
 
 // 全局应用
 app.Use(AuthMiddleware)
+app.GET("/profile", &ProfileController{})
 
 // 路由组应用
 api := app.Group("/api")
 api.Use(AuthMiddleware)
 api.GET("/profile", &ProfileController{})
 ```
+
+中间件必须先于路由、静态资源、pprof 端点或嵌套路由组注册。GoLiteKit 会在注册时预构建 middleware chain；如果在添加路由后再调用 `Use`，会直接 panic，避免认证、权限等中间件被误以为已经生效。路由和中间件注册应在应用启动阶段由单个 goroutine 完成。
 
 ## 限流
 
@@ -187,9 +199,12 @@ limiter := glk.NewRateLimiter(
     10, 10, // 每个 key 10 req/s
     glk.WithGlobalRateLimiter(1000, 1000), // 全局 1000 req/s
     glk.WithTTL(5 * time.Minute),
+    glk.WithMaxKeys(10000),
 )
 app.Use(limiter.RateLimiterAsMiddleware(glk.ByIP))
 ```
+
+每个 key 的 limiter 默认带 TTL 和 key 数量上限。只有当 key 集合天然有界时，才建议显式使用 `WithoutTTL()`。
 
 ## SSE 流式响应
 
@@ -199,7 +214,7 @@ type StreamController struct {
 }
 
 func (c *StreamController) Serve(ctx context.Context) error {
-    sse := c.ServeSSE()
+    sse := c.SSE()
     for i := 0; i < 5; i++ {
         sse.Send(glk.SSEvent{Data: fmt.Sprintf("message %d", i)})
         time.Sleep(time.Second)
@@ -238,13 +253,13 @@ func (c *MyController) Serve(ctx context.Context) error {
 
 ```go
 app.GET("/ping", glk.HandlerFunc(func(ctx *glk.Context) error {
-    return ctx.ServeJSON(map[string]string{"status": "ok"})
+    return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }))
 ```
 
-## 服务注册表
+## 自定义服务
 
-注册和获取 DB/Redis 之外的自定义服务：
+在应用创建时注册自定义服务，并在请求处理中读取：
 
 ```go
 app := glk.NewApp(
@@ -255,17 +270,18 @@ app := glk.NewApp(
 app.GET("/cache", glk.HandlerFunc(func(ctx *glk.Context) error {
     cache := ctx.Service("cache").(MyCache)
     // ...
-    return ctx.ServeJSON(map[string]string{"status": "ok"})
+    return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }))
 
 // 在控制器中使用
 func (c *MyController) Serve(ctx context.Context) error {
-    gcx := glk.GetContext(ctx)
-    cache := gcx.Service("cache").(MyCache)
+    cache := c.Service("cache").(MyCache)
     // ...
     return nil
 }
 ```
+
+自定义服务在请求处理中只读。请求级临时值请使用 request context data。
 
 ## 优雅关闭
 
@@ -288,11 +304,17 @@ app.Start()
 app.Shutdown(ctx)
 ```
 
+如果直接使用底层 `Server`，`srv.Done()` 会返回 `Start` 后后台 `Serve` 的结果；正常关闭返回 `nil`，异常 listener/server 退出会返回对应错误。
+
+同一个 `Server` 已在运行时，再次调用 `Start` 会返回 already-started 错误。
+
 测试或自定义绑定地址时，可以传入显式 `ServerConfig`：
 
 ```go
 app.Start(glk.ServerConfig{Addr: "127.0.0.1:0"})
 ```
+
+超时和 header 限制字段为零值时，会继承 `DefaultServerConfig` 的安全默认值；因此只传 `Addr` 也会保留读写、请求头和空闲连接超时。
 
 ## Pprof
 

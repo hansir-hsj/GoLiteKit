@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // gzipReader decompresses the response body for assertion.
@@ -122,6 +123,9 @@ func TestCompressionMiddleware_NoContent204(t *testing.T) {
 	if rec.Header().Get("Content-Encoding") == "gzip" {
 		t.Error("expected Content-Encoding to be removed for 204 No Content")
 	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("expected empty body for 204 No Content, got %q", rec.Body.String())
+	}
 }
 
 // flushableRecorder wraps ResponseRecorder and records Flush calls.
@@ -154,6 +158,52 @@ func TestGzipResponseWriter_Flush(t *testing.T) {
 
 	if fr.flushCount == 0 {
 		t.Error("expected at least one Flush call to propagate to underlying writer")
+	}
+}
+
+func TestGzipResponseWriter_ResponseControllerFlush(t *testing.T) {
+	fr := &flushableRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		if _, err := w.Write([]byte("chunk")); err != nil {
+			return err
+		}
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			t.Fatalf("ResponseController.Flush: %v", err)
+		}
+		return nil
+	})
+
+	mw := CompressionMiddleware()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	mw(inner).ServeHTTP(fr, req)
+
+	if fr.flushCount == 0 {
+		t.Fatal("expected flush to reach underlying writer")
+	}
+}
+
+func TestGzipResponseWriter_ResponseControllerSetWriteDeadline(t *testing.T) {
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	deadline := time.Now().Add(time.Second)
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		if err := http.NewResponseController(w).SetWriteDeadline(deadline); err != nil {
+			t.Fatalf("ResponseController.SetWriteDeadline: %v", err)
+		}
+		return nil
+	})
+
+	mw := CompressionMiddleware()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	mw(inner).ServeHTTP(rec, req)
+
+	if !rec.writeDeadline.Equal(deadline) {
+		t.Fatalf("write deadline = %v, want %v", rec.writeDeadline, deadline)
 	}
 }
 

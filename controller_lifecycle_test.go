@@ -72,9 +72,9 @@ func (c *lifecycleOrderController) Init(ctx context.Context) error {
 	return c.BaseControllerOf.Init(ctx)
 }
 
-func (c *lifecycleOrderController) ParseRequest(ctx context.Context, body []byte) error {
+func (c *lifecycleOrderController) ParseRequest(ctx context.Context) error {
 	c.recorder.append("ParseRequest")
-	return c.BaseControllerOf.ParseRequest(ctx, body)
+	return c.BaseControllerOf.ParseRequest(ctx)
 }
 
 func (c *lifecycleOrderController) Validate(ctx context.Context) error {
@@ -86,7 +86,7 @@ func (c *lifecycleOrderController) Validate(ctx context.Context) error {
 func (c *lifecycleOrderController) Serve(ctx context.Context) error {
 	c.recorder.append("Serve")
 	c.recorder.markServe()
-	return c.ServeJSON(map[string]string{"ok": "true"})
+	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }
 
 func (c *lifecycleOrderController) Finalize(ctx context.Context) error {
@@ -137,7 +137,7 @@ func (c *parseFailureController) Validate(ctx context.Context) error {
 
 func (c *parseFailureController) Serve(ctx context.Context) error {
 	c.recorder.markServe()
-	return c.ServeJSON(map[string]string{"ok": "true"})
+	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }
 
 func (c *parseFailureController) Finalize(ctx context.Context) error {
@@ -183,7 +183,7 @@ func (c *validateFailureController) Validate(ctx context.Context) error {
 
 func (c *validateFailureController) Serve(ctx context.Context) error {
 	c.recorder.markServe()
-	return c.ServeJSON(map[string]string{"ok": "true"})
+	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }
 
 func (c *validateFailureController) Finalize(ctx context.Context) error {
@@ -225,7 +225,7 @@ type noBodyMalformedJSONController struct {
 }
 
 func (c *noBodyMalformedJSONController) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"ok": "true"})
+	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }
 
 func TestControllerLifecycle_NoBodySkipsMalformedJSONParsing(t *testing.T) {
@@ -251,22 +251,20 @@ func TestControllerLifecycle_NoBodySkipsMalformedJSONParsing(t *testing.T) {
 }
 
 type customParserRecorder struct {
-	mu         sync.Mutex
-	bodyArgLen int
-	name       string
+	mu   sync.Mutex
+	name string
 }
 
-func (r *customParserRecorder) record(bodyArgLen int, name string) {
+func (r *customParserRecorder) record(name string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.bodyArgLen = bodyArgLen
 	r.name = name
 }
 
-func (r *customParserRecorder) snapshot() (int, string) {
+func (r *customParserRecorder) snapshot() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.bodyArgLen, r.name
+	return r.name
 }
 
 type customParserReadsRequestController struct {
@@ -275,9 +273,7 @@ type customParserReadsRequestController struct {
 	name     string
 }
 
-func (c *customParserReadsRequestController) ParseRequest(ctx context.Context, body []byte) error {
-	bodyArgLen := len(body)
-
+func (c *customParserReadsRequestController) ParseRequest(ctx context.Context) error {
 	rawBody, err := io.ReadAll(GetContext(ctx).Request().Body)
 	if err != nil {
 		return err
@@ -288,7 +284,7 @@ func (c *customParserReadsRequestController) ParseRequest(ctx context.Context, b
 		return err
 	}
 	c.name = payload.Name
-	c.recorder.record(bodyArgLen, c.name)
+	c.recorder.record(c.name)
 	return nil
 }
 
@@ -300,7 +296,7 @@ func (c *customParserReadsRequestController) Validate(ctx context.Context) error
 }
 
 func (c *customParserReadsRequestController) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"ok": "true"})
+	return c.JSON(http.StatusOK, map[string]string{"ok": "true"})
 }
 
 func TestControllerLifecycle_CustomRequestParserOwnsBodyParsing(t *testing.T) {
@@ -317,10 +313,7 @@ func TestControllerLifecycle_CustomRequestParserOwnsBodyParsing(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body = %s", rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	bodyArgLen, name := recorder.snapshot()
-	if bodyArgLen != 0 {
-		t.Fatalf("ParseRequest body arg len = %d, want 0", bodyArgLen)
-	}
+	name := recorder.snapshot()
 	if name != "alice" {
 		t.Fatalf("custom parser name = %q, want alice", name)
 	}

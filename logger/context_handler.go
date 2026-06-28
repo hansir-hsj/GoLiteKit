@@ -43,7 +43,7 @@ type ContextHandler struct {
 	slog.Handler
 }
 
-// please call WithContext First
+// WithLoggerContext attaches request-scoped logger fields to ctx.
 func WithLoggerContext(ctx context.Context) context.Context {
 	loggerCtx := GetLoggerContext(ctx)
 	if loggerCtx == nil {

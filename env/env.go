@@ -3,6 +3,7 @@ package env
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/hansir-hsj/GoLiteKit/config"
@@ -18,6 +19,7 @@ const (
 
 var (
 	defaultEnv *Env
+	envMu      sync.RWMutex
 )
 
 type EnvHttpServer struct {
@@ -92,231 +94,264 @@ func Init(path string) error {
 	if err != nil {
 		return err
 	}
-	defaultEnv = &Env{
+	nextEnv := &Env{
 		rootDir: curPath,
 		confDir: filepath.Join(curPath, "conf"),
 	}
-	err = config.Parse(path, defaultEnv)
-	if err != nil {
+	if err := config.Parse(path, nextEnv); err != nil {
 		return err
 	}
 
+	envMu.Lock()
+	defaultEnv = nextEnv
+	envMu.Unlock()
 	return nil
 }
 
+func currentEnv() *Env {
+	envMu.RLock()
+	defer envMu.RUnlock()
+	return defaultEnv
+}
+
 func AppName() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	return defaultEnv.AppName
+	return e.AppName
 }
 
 func RunMode() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	return defaultEnv.RunMode
+	return e.RunMode
 }
 
 func Network() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	return defaultEnv.Network
+	return e.Network
 }
 
 func Addr() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	return defaultEnv.Addr
+	return e.Addr
 }
 
 func RootDir() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	return defaultEnv.rootDir
+	return e.rootDir
 }
 
 func ConfDir() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	return defaultEnv.confDir
+	return e.confDir
 }
 
 func StaticDir() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	if defaultEnv.StaticDir == "" {
+	if e.StaticDir == "" {
 		return ""
 	}
-	return filepath.Join(RootDir(), defaultEnv.StaticDir)
+	return filepath.Join(e.rootDir, e.StaticDir)
 }
 
 func ReadTimeout() time.Duration {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return DefaultReadTimeout
 	}
-	if defaultEnv.ReadTimeout == 0 {
+	if e.ReadTimeout == 0 {
 		return DefaultReadTimeout
 	}
-	return time.Duration(defaultEnv.ReadTimeout) * time.Millisecond
+	return time.Duration(e.ReadTimeout) * time.Millisecond
 }
 
 func ReadHeaderTimeout() time.Duration {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return DefaultReadHeaderTimeout
 	}
-	if defaultEnv.ReadHeaderTimeout == 0 {
+	if e.ReadHeaderTimeout == 0 {
 		return DefaultReadHeaderTimeout
 	}
-	return time.Duration(defaultEnv.ReadHeaderTimeout) * time.Millisecond
+	return time.Duration(e.ReadHeaderTimeout) * time.Millisecond
 }
 
 func WriteTimeout() time.Duration {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return DefaultWriteTimeout
 	}
-	if defaultEnv.WriteTimeout == 0 {
+	if e.WriteTimeout == 0 {
 		return DefaultWriteTimeout
 	}
-	return time.Duration(defaultEnv.WriteTimeout) * time.Millisecond
+	return time.Duration(e.WriteTimeout) * time.Millisecond
 }
 
 func IdleTimeout() time.Duration {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return DefaultIdleTimeout
 	}
-	if defaultEnv.IdleTimeout == 0 {
+	if e.IdleTimeout == 0 {
 		return DefaultIdleTimeout
 	}
-	return time.Duration(defaultEnv.IdleTimeout) * time.Millisecond
+	return time.Duration(e.IdleTimeout) * time.Millisecond
 }
 
 func ShutdownTimeout() time.Duration {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return DefaultShutdownTimeout
 	}
-	if defaultEnv.ShutdownTimeout == 0 {
+	if e.ShutdownTimeout == 0 {
 		return DefaultShutdownTimeout
 	}
-	return time.Duration(defaultEnv.ShutdownTimeout) * time.Millisecond
+	return time.Duration(e.ShutdownTimeout) * time.Millisecond
 }
 
 func MaxHeaderBytes() int {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return 1 << 20
 	}
-	if defaultEnv.MaxHeaderBytes == 0 {
+	if e.MaxHeaderBytes == 0 {
 		return 1 << 20
 	}
-	return defaultEnv.MaxHeaderBytes
+	return e.MaxHeaderBytes
 }
 
 func RateLimit() int {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return 0
 	}
-	return defaultEnv.RateLimit
+	return e.RateLimit
 }
 
 func RateBurst() int {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return 0
 	}
-	if defaultEnv.RateBurst == 0 {
-		return defaultEnv.RateLimit
+	if e.RateBurst == 0 {
+		return e.RateLimit
 	}
-	return defaultEnv.RateBurst
+	return e.RateBurst
 }
 
 func DBConfigFile() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	if defaultEnv.DB == "" {
+	if e.DB == "" {
 		return ""
 	}
-	return filepath.Join(ConfDir(), defaultEnv.DB)
+	return filepath.Join(e.confDir, e.DB)
 }
 
 func RedisConfigFile() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	if defaultEnv.Redis == "" {
+	if e.Redis == "" {
 		return ""
 	}
-	return filepath.Join(ConfDir(), defaultEnv.Redis)
+	return filepath.Join(e.confDir, e.Redis)
 }
 
 func LoggerConfigFile() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	if defaultEnv.Logger == "" {
+	if e.Logger == "" {
 		return ""
 	}
-	return filepath.Join(ConfDir(), defaultEnv.Logger)
+	return filepath.Join(e.confDir, e.Logger)
 }
 
 func TLS() bool {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return false
 	}
-	return defaultEnv.TLS
+	return e.TLS
 }
 
 func TLSCertFile() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	if defaultEnv.CertFile == "" {
+	if e.CertFile == "" {
 		return ""
 	}
-	return filepath.Join(ConfDir(), defaultEnv.CertFile)
+	return filepath.Join(e.confDir, e.CertFile)
 }
 
 func TLSKeyFile() string {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return ""
 	}
-	if defaultEnv.KeyFile == "" {
+	if e.KeyFile == "" {
 		return ""
 	}
-	return filepath.Join(ConfDir(), defaultEnv.KeyFile)
+	return filepath.Join(e.confDir, e.KeyFile)
 }
 
 func EnablePprof() bool {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return false
 	}
-	return defaultEnv.EnablePprof
+	return e.EnablePprof
 }
 
 func SSETimeout() time.Duration {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return 300 * time.Second
 	}
-	if defaultEnv.Timeout == 0 {
+	if e.Timeout == 0 {
 		return 300 * time.Second
 	}
-	return time.Duration(defaultEnv.Timeout) * time.Millisecond
+	return time.Duration(e.Timeout) * time.Millisecond
 }
 
 func LogRequestBody() bool {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return false
 	}
-	return defaultEnv.LogRequestBody
+	return e.LogRequestBody
 }
 
 func LogResponseBody() bool {
-	if defaultEnv == nil {
+	e := currentEnv()
+	if e == nil {
 		return false
 	}
-	return defaultEnv.LogResponseBody
+	return e.LogResponseBody
 }

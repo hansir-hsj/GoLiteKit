@@ -16,10 +16,10 @@ func TestWithObservabilityStoresObserverAndMiddleware(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 
 	app := glk.NewApp(WithObservability(WithTracerProvider(provider)))
-	if app.Services.Observer() == nil {
+	if app.Services().Observer() == nil {
 		t.Fatalf("observer was not stored")
 	}
-	middleware := app.Services.ObservabilityMiddleware()
+	middleware := app.Services().ObservabilityMiddleware()
 	if middleware == nil {
 		t.Fatalf("observability middleware was not stored")
 	}

@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-
-	"github.com/hansir-hsj/GoLiteKit/env"
 )
 
 // TimeoutOptions configures the timeout middleware.
@@ -16,7 +14,7 @@ type TimeoutOptions struct {
 }
 
 // TimeoutMiddleware creates a timeout middleware.
-// If opts is provided, uses explicit durations; otherwise falls back to env config.
+// Without options, no timeout is applied.
 func TimeoutMiddleware(opts ...TimeoutOptions) Middleware {
 	var opt TimeoutOptions
 	if len(opts) > 0 {
@@ -27,12 +25,6 @@ func TimeoutMiddleware(opts ...TimeoutOptions) Middleware {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 			timeout := opt.Duration
 			sseTimeout := opt.SSETimeout
-
-			// Fall back to env if no explicit options provided.
-			if timeout == 0 && sseTimeout == 0 {
-				timeout = env.WriteTimeout()
-				sseTimeout = env.SSETimeout()
-			}
 
 			if sseTimeout > 0 && r.Header.Get("Accept") == "text/event-stream" {
 				timeout = sseTimeout
@@ -52,7 +44,7 @@ func TimeoutMiddleware(opts ...TimeoutOptions) Middleware {
 			err := next(timeoutCtx, w, r.WithContext(timeoutCtx))
 
 			if timeoutCtx.Err() == context.DeadlineExceeded && err == nil {
-				return ErrTimeout(fmt.Sprintf("Request timeout: %v", context.Cause(timeoutCtx)))
+				return ErrTimeout(fmt.Sprintf("Request timeout: %v", context.Cause(timeoutCtx)), nil)
 			}
 
 			return err

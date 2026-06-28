@@ -32,7 +32,7 @@ func TestLogIDMiddlewareAddsLogIDToLoggerContext(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/logid", nil)
-	req = req.WithContext(WithContext(req.Context()))
+	req = req.WithContext(withContext(req.Context()))
 	rec := httptest.NewRecorder()
 
 	mw(inner).ServeHTTP(rec, req)

@@ -11,6 +11,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
 
 	glk "github.com/hansir-hsj/GoLiteKit"
 )
@@ -31,7 +33,7 @@ func RequestIDMiddleware(next glk.Handler) glk.Handler {
 func AuthMiddleware(next glk.Handler) glk.Handler {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		if r.Header.Get("X-Token") == "" {
-			return glk.ErrUnauthorized("missing X-Token")
+			return glk.ErrUnauthorized("missing X-Token", nil)
 		}
 		return next(ctx, w, r)
 	}
@@ -41,7 +43,7 @@ func AuthMiddleware(next glk.Handler) glk.Handler {
 func AdminMiddleware(next glk.Handler) glk.Handler {
 	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 		if r.Header.Get("X-Admin") == "" {
-			return glk.ErrForbidden("admin only")
+			return glk.ErrForbidden("admin only", nil)
 		}
 		return next(ctx, w, r)
 	}
@@ -54,7 +56,7 @@ type PingController struct {
 }
 
 func (c *PingController) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"status": "ok"})
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 type ProfileController struct {
@@ -62,7 +64,7 @@ type ProfileController struct {
 }
 
 func (c *ProfileController) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"user": "alice"})
+	return c.JSON(http.StatusOK, map[string]string{"user": "alice"})
 }
 
 type AdminController struct {
@@ -70,7 +72,7 @@ type AdminController struct {
 }
 
 func (c *AdminController) Serve(ctx context.Context) error {
-	return c.ServeJSON(map[string]string{"role": "admin"})
+	return c.JSON(http.StatusOK, map[string]string{"role": "admin"})
 }
 
 // ---- main ------------------------------------------------------------------
@@ -95,8 +97,11 @@ func main() {
 	admin.Use(AdminMiddleware)
 	admin.GET("", &AdminController{})
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
 	log.Println("listening on :8080")
-	if err := app.Run(":8080"); err != nil {
+	if err := app.ListenAndServe(ctx, glk.ServerConfig{Addr: ":8080"}); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -58,7 +58,7 @@ func TestWithObserverStoresObserver(t *testing.T) {
 	observer := &recordingObserver{}
 	app := NewApp(WithObserver(observer))
 
-	if got := app.Services.Observer(); got != observer {
+	if got := app.Services().Observer(); got != observer {
 		t.Fatalf("Services.Observer() = %v, want %v", got, observer)
 	}
 }
@@ -93,6 +93,21 @@ func TestWithObservabilityMiddlewareIsInsertedBeforeLogger(t *testing.T) {
 	want := []string{"observability-before", "handler", "logger", "observability-after"}
 	if !reflect.DeepEqual(order, want) {
 		t.Fatalf("order = %v, want %v", order, want)
+	}
+}
+
+func TestDefaultMiddlewaresIncludesObservabilityFirst(t *testing.T) {
+	observerMiddleware := Middleware(func(next Handler) Handler { return next })
+	services := &Services{}
+	WithObservabilityMiddleware(observerMiddleware)(services)
+
+	middlewares := defaultMiddlewares(services, defaultMiddlewareOptions{})
+
+	if len(middlewares) != 6 {
+		t.Fatalf("default middleware count = %d, want 6", len(middlewares))
+	}
+	if reflect.ValueOf(middlewares[0]).Pointer() != reflect.ValueOf(observerMiddleware).Pointer() {
+		t.Fatal("expected observability middleware to be first")
 	}
 }
 

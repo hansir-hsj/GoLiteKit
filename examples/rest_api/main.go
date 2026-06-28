@@ -10,6 +10,8 @@ package main
 import (
 	"context"
 	"log"
+	"os"
+	"os/signal"
 
 	glk "github.com/hansir-hsj/GoLiteKit"
 )
@@ -81,8 +83,11 @@ func main() {
 	api.GET("/users/{id}", &GetUserController{})
 	api.POST("/users", &CreateUserController{})
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
 	log.Println("listening on :8080")
-	if err := app.Run(":8080"); err != nil {
+	if err := app.ListenAndServe(ctx, glk.ServerConfig{Addr: ":8080"}); err != nil {
 		log.Fatal(err)
 	}
 }

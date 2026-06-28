@@ -10,6 +10,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"time"
 
 	glk "github.com/hansir-hsj/GoLiteKit"
@@ -73,10 +75,13 @@ func main() {
 	app.GET("/events", &CounterController{})
 	app.GET("/chat", &ChatController{})
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
 	log.Println("listening on :8080")
 	log.Println("  curl -N http://localhost:8080/events")
 	log.Println("  curl -N http://localhost:8080/chat")
-	if err := app.Run(":8080"); err != nil {
+	if err := app.ListenAndServe(ctx, glk.ServerConfig{Addr: ":8080"}); err != nil {
 		log.Fatal(err)
 	}
 }

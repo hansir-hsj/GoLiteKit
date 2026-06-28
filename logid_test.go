@@ -18,7 +18,7 @@ func TestGenerateLogIDReturnsHexLength16(t *testing.T) {
 }
 
 func TestEnsureLogIDCreatesAndReusesID(t *testing.T) {
-	ctx := WithContext(context.Background())
+	ctx := withContext(context.Background())
 
 	first := EnsureLogID(ctx)
 	if first == "" {
@@ -32,7 +32,7 @@ func TestEnsureLogIDCreatesAndReusesID(t *testing.T) {
 }
 
 func TestSetLogIDIgnoresEmpty(t *testing.T) {
-	ctx := WithContext(context.Background())
+	ctx := withContext(context.Background())
 	SetLogID(ctx, "custom-log-id")
 
 	SetLogID(ctx, "")

@@ -12,9 +12,9 @@ func buildRestCtx(t *testing.T) (context.Context, *httptest.ResponseRecorder) {
 	t.Helper()
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	gcx.setContextOptions(withRequest(req.WithContext(ctx)), withResponseWriter(rec))
 	return ctx, rec
 }
 
@@ -140,10 +140,10 @@ func TestRestController_ServeErrorMsg(t *testing.T) {
 func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	EnsureLogID(ctx)
 	gcx := GetContext(ctx)
-	gcx.SetContextOptions(WithRequest(req.WithContext(ctx)), WithResponseWriter(rec))
+	gcx.setContextOptions(withRequest(req.WithContext(ctx)), withResponseWriter(rec))
 
 	c := &RestController{}
 	c.gcx = gcx

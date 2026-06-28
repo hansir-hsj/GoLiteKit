@@ -1,6 +1,9 @@
 package golitekit
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 const (
 	OK = 0
@@ -27,7 +30,7 @@ func (c *RestControllerOf[T]) ServeData(ctx context.Context, data any) error {
 		Data:   data,
 		LogID:  logID,
 	}
-	return c.ServeJSON(res)
+	return c.JSON(http.StatusOK, res)
 }
 
 func (c *RestControllerOf[T]) ServeOK(ctx context.Context) error {
@@ -42,7 +45,7 @@ func (c *RestControllerOf[T]) ServeMsgData(ctx context.Context, msg string, data
 		Data:   data,
 		LogID:  logID,
 	}
-	return c.ServeJSON(res)
+	return c.JSON(http.StatusOK, res)
 }
 
 func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg string) error {
@@ -52,7 +55,7 @@ func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg st
 		Msg:    msg,
 		LogID:  logID,
 	}
-	return c.ServeJSON(res)
+	return c.JSON(http.StatusOK, res)
 }
 
 func (c *RestControllerOf[T]) ServeErrorMsg(ctx context.Context, msg string) error {

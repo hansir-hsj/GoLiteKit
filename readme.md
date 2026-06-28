@@ -24,7 +24,7 @@ Future benchmark reports should include the benchmark code, command, machine pro
 - **Built-in middleware** — logger, error handler, timeout, rate limiter, gzip, log IDs
 - **Observability** — optional OpenTelemetry adapter for request spans, service spans, and metrics
 - **Structured logging** — based on `slog`, with body logging (truncation & redaction), log rotation
-- **Service registry** — DB, Redis, Logger via functional options + generic `Set/Get` for custom services
+- **Custom services** — DB, Redis, Logger via functional options + startup-registered custom dependencies
 - **Graceful lifecycle** — `Start`, `ListenAndServe` (context-aware), `Shutdown` with configurable timeout
 - **Pprof mounting** — protected pprof endpoints with optional loopback-only restriction
 - **glk CLI** — scaffold new projects with `glk new`
@@ -44,6 +44,9 @@ package main
 
 import (
     "context"
+    "net/http"
+    "os"
+    "os/signal"
 
     glk "github.com/hansir-hsj/GoLiteKit"
 )
@@ -53,13 +56,17 @@ type HelloController struct {
 }
 
 func (c *HelloController) Serve(ctx context.Context) error {
-    return c.ServeJSON(map[string]string{"message": "hello, world"})
+    return c.JSON(http.StatusOK, map[string]string{"message": "hello, world"})
 }
 
 func main() {
     app := glk.NewApp()
     app.GET("/hello", &HelloController{})
-    app.Run(":8080")
+
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+    defer stop()
+
+    app.ListenAndServe(ctx, glk.ServerConfig{Addr: ":8080"})
 }
 ```
 
@@ -87,7 +94,7 @@ type CreateUserController struct {
 func (c *CreateUserController) Serve(ctx context.Context) error {
     req := c.GetRequest()
     // req.Name, req.Email, req.Age are populated
-    return c.ServeJSON(map[string]any{"created": req.Name})
+    return c.JSON(http.StatusOK, map[string]any{"created": req.Name})
 }
 ```
 
@@ -100,6 +107,8 @@ Init → ParseRequest → Validate → Serve → Finalize
 ```
 
 `ParseRequest` binds JSON/form/multipart data before `Validate`, so validation code can safely inspect `c.GetRequest()` or `c.Request`. Use middleware or `Init` for pre-parse checks such as authentication or feature flags.
+
+Each request gets a fresh controller instance copied from the registered controller prototype. Store immutable route configuration or dependency references on the prototype, and keep request-specific state on the per-request instance.
 
 ## REST Controller
 
@@ -155,7 +164,7 @@ type GetUserController struct {
 
 func (c *GetUserController) Serve(ctx context.Context) error {
     id := c.PathValueInt("id", 0)
-    return c.ServeJSON(map[string]int{"id": id})
+    return c.JSON(http.StatusOK, map[string]int{"id": id})
 }
 ```
 
@@ -166,7 +175,7 @@ func (c *GetUserController) Serve(ctx context.Context) error {
 func AuthMiddleware(next glk.Handler) glk.Handler {
     return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
         if r.Header.Get("Authorization") == "" {
-            return glk.ErrUnauthorized("missing token")
+            return glk.ErrUnauthorized("missing token", nil)
         }
         return next(ctx, w, r)
     }
@@ -174,12 +183,15 @@ func AuthMiddleware(next glk.Handler) glk.Handler {
 
 // Apply globally
 app.Use(AuthMiddleware)
+app.GET("/profile", &ProfileController{})
 
 // Apply to a group
 api := app.Group("/api")
 api.Use(AuthMiddleware)
 api.GET("/profile", &ProfileController{})
 ```
+
+Register middleware before registering routes, static files, pprof endpoints, or nested groups. GoLiteKit prebuilds the middleware chain at registration time and panics if `Use` is called after routes were added. Route and middleware registration is intended for application startup and should be done from one goroutine.
 
 ## Rate Limiting
 
@@ -188,9 +200,12 @@ limiter := glk.NewRateLimiter(
     10, 10, // 10 req/s per key
     glk.WithGlobalRateLimiter(1000, 1000), // 1000 req/s globally
     glk.WithTTL(5 * time.Minute),
+    glk.WithMaxKeys(10000),
 )
 app.Use(limiter.RateLimiterAsMiddleware(glk.ByIP))
 ```
+
+Per-key limiters use a safe default TTL and key capacity limit. Use `WithoutTTL()` only when keys are bounded by design.
 
 ## SSE Streaming
 
@@ -200,7 +215,7 @@ type StreamController struct {
 }
 
 func (c *StreamController) Serve(ctx context.Context) error {
-    sse := c.ServeSSE()
+    sse := c.SSE()
     for i := 0; i < 5; i++ {
         sse.Send(glk.SSEvent{Data: fmt.Sprintf("message %d", i)})
         time.Sleep(time.Second)
@@ -239,13 +254,13 @@ For simple endpoints that don't need a full controller:
 
 ```go
 app.GET("/ping", glk.HandlerFunc(func(ctx *glk.Context) error {
-    return ctx.ServeJSON(map[string]string{"status": "ok"})
+    return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }))
 ```
 
-## Service Registry
+## Custom Services
 
-Register and retrieve custom services beyond DB/Redis:
+Register custom services during app construction, then read them from requests:
 
 ```go
 app := glk.NewApp(
@@ -256,17 +271,18 @@ app := glk.NewApp(
 app.GET("/cache", glk.HandlerFunc(func(ctx *glk.Context) error {
     cache := ctx.Service("cache").(MyCache)
     // ...
-    return ctx.ServeJSON(map[string]string{"status": "ok"})
+    return ctx.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }))
 
 // In controller
 func (c *MyController) Serve(ctx context.Context) error {
-    gcx := glk.GetContext(ctx)
-    cache := gcx.Service("cache").(MyCache)
+    cache := c.Service("cache").(MyCache)
     // ...
     return nil
 }
 ```
+
+Custom services are read-only during request handling. Use request context data for request-scoped values.
 
 ## Graceful Shutdown
 
@@ -289,11 +305,17 @@ app.Start()
 app.Shutdown(ctx)
 ```
 
+For low-level `Server` usage, `srv.Done()` reports the background `Serve` result after `Start`; normal shutdown sends `nil`, while unexpected listener/server failures send the error.
+
+Calling `Start` again while the same `Server` is already running returns an already-started error.
+
 For tests or custom bind addresses, pass an explicit `ServerConfig`:
 
 ```go
 app.Start(glk.ServerConfig{Addr: "127.0.0.1:0"})
 ```
+
+Zero-valued timeout and header-limit fields inherit safe defaults from `DefaultServerConfig`, so passing only `Addr` keeps read/write/header/idle timeouts enabled.
 
 ## Pprof
 

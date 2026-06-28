@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	"github.com/hansir-hsj/GoLiteKit/env"
 )
 
 func testTimeoutMiddleware(timeout time.Duration) Middleware {
@@ -28,7 +26,7 @@ func testTimeoutMiddleware(timeout time.Duration) Middleware {
 			err := next(timeoutCtx, w, r.WithContext(timeoutCtx))
 
 			if timeoutCtx.Err() == context.DeadlineExceeded && err == nil {
-				return ErrTimeout(fmt.Sprintf("Request timeout: %v", context.Cause(timeoutCtx)))
+				return ErrTimeout(fmt.Sprintf("Request timeout: %v", context.Cause(timeoutCtx)), nil)
 			}
 
 			return err
@@ -48,7 +46,7 @@ func TestTimeoutMiddleware_CompletesBeforeTimeout(t *testing.T) {
 	wrapped := mw(inner)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -73,7 +71,7 @@ func TestTimeoutMiddleware_TimesOut(t *testing.T) {
 	wrapped := mw(inner)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -102,7 +100,7 @@ func TestTimeoutMiddleware_ZeroTimeout(t *testing.T) {
 	wrapped := mw(inner)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -127,7 +125,7 @@ func TestTimeoutMiddleware_ContextCancellation(t *testing.T) {
 	wrapped := mw(inner)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 
@@ -138,34 +136,51 @@ func TestTimeoutMiddleware_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestTimeoutMiddleware_SSE(t *testing.T) {
-	err := env.Init("env/app.toml")
-	if err != nil {
-		t.Skip("env not initialized, skipping test: " + err.Error())
-	}
+func TestTimeoutMiddleware_NoOptionsDoesNotReadEnv(t *testing.T) {
+	mw := TimeoutMiddleware()
 
-	t.Run("uses SSE timeout for event-stream requests", func(t *testing.T) {
-		mw := TimeoutMiddleware()
-
-		inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-			deadline, ok := ctx.Deadline()
-			if ok {
-				remaining := time.Until(deadline)
-				t.Logf("SSE request has deadline in %v", remaining)
-			}
-			return nil
-		})
-
-		wrapped := mw(inner)
-
-		req := httptest.NewRequest("GET", "/events", nil)
-		req.Header.Set("Accept", "text/event-stream")
-		ctx := WithContext(req.Context())
-		req = req.WithContext(ctx)
-		rec := httptest.NewRecorder()
-
-		wrapped(ctx, rec, req)
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		if _, ok := ctx.Deadline(); ok {
+			t.Fatal("expected no deadline without explicit timeout options")
+		}
+		return nil
 	})
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	ctx := withContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	if err := mw(inner)(ctx, rec, req); err != nil {
+		t.Fatalf("middleware error = %v", err)
+	}
+}
+
+func TestTimeoutMiddleware_ExplicitSSETimeout(t *testing.T) {
+	mw := TimeoutMiddleware(TimeoutOptions{Duration: time.Minute, SSETimeout: 5 * time.Second})
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("expected deadline for SSE request")
+		}
+		remaining := time.Until(deadline)
+		if remaining > 6*time.Second {
+			t.Fatalf("deadline remaining = %v, want SSE timeout", remaining)
+		}
+		return nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	ctx := withContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	if err := mw(inner)(ctx, rec, req); err != nil {
+		t.Fatalf("middleware error = %v", err)
+	}
 }
 
 func TestTimeoutMiddlewareUsesExplicitDuration(t *testing.T) {
@@ -184,7 +199,7 @@ func TestTimeoutMiddlewareUsesExplicitDuration(t *testing.T) {
 	wrapped := mw(inner)
 
 	req := httptest.NewRequest("GET", "/test", nil)
-	ctx := WithContext(req.Context())
+	ctx := withContext(req.Context())
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
 

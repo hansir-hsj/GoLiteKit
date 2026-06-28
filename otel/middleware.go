@@ -117,3 +117,7 @@ func (w *statusCapture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	}
 	return nil, nil, fmt.Errorf("underlying ResponseWriter does not support Hijack")
 }
+
+func (w *statusCapture) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}

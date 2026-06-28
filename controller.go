@@ -51,22 +51,15 @@ type Validator interface {
 }
 
 // RequestParser is called after Init and before Validate, and owns request parsing.
-// The body argument is retained for compatibility and may be nil; custom parsers
-// should read from the request or context as needed.
+// Custom parsers should read from the request or context as needed.
 // BaseControllerOf implements JSON/form/multipart parsing automatically.
 type RequestParser interface {
-	ParseRequest(ctx context.Context, body []byte) error
+	ParseRequest(ctx context.Context) error
 }
 
 // Finalizer is called after Serve for cleanup, metrics, or audit logging.
 type Finalizer interface {
 	Finalize(ctx context.Context) error
-}
-
-// Resettable allows cheap in-place reset before returning to sync.Pool.
-// BaseControllerOf implements this automatically.
-type Resettable interface {
-	ResetController()
 }
 
 // BaseControllerOf is a generic controller base. T is the request struct type.
@@ -93,7 +86,7 @@ func (c *BaseControllerOf[T]) MaxBodySize() int64 {
 func (c *BaseControllerOf[T]) Init(ctx context.Context) error {
 	c.gcx = GetContext(ctx)
 	if c.gcx == nil {
-		return fmt.Errorf("golitekit: context not initialized; ensure WithContext is called before the controller")
+		return fmt.Errorf("golitekit: context not initialized; ensure the controller runs through Router")
 	}
 	c.request = c.gcx.Request()
 	c.logger = c.gcx.logger
@@ -114,11 +107,18 @@ func (c *BaseControllerOf[T]) Redis() *redis.Client {
 	return c.gcx.Redis()
 }
 
+func (c *BaseControllerOf[T]) Service(key string) any {
+	if c.gcx == nil {
+		return nil
+	}
+	return c.gcx.Service(key)
+}
+
 func (c *BaseControllerOf[T]) Validate(ctx context.Context) error {
 	return nil
 }
 
-func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context, body []byte) error {
+func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context) error {
 	var zeroValue T
 	if _, isNoBody := any(zeroValue).(NoBody); isNoBody {
 		return nil
@@ -137,11 +137,11 @@ func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context, body []byte) err
 		return c.bindFormData(&c.Request)
 	}
 
-	// For all other types (JSON, etc.) rely on RawBody populated by parseBody.
-	if len(c.gcx.RawBody) == 0 {
+	// For all other types (JSON, etc.) rely on rawBody populated by parseBody.
+	if len(c.gcx.rawBody) == 0 {
 		return nil
 	}
-	return json.Unmarshal(c.gcx.RawBody, &c.Request)
+	return json.Unmarshal(c.gcx.rawBody, &c.Request)
 }
 
 // bindFormData binds form data to a struct.
@@ -251,27 +251,27 @@ func (c *BaseControllerOf[T]) BadRequest(msg string, internal error) error {
 
 // Unauthorized returns a 401 AppError.
 func (c *BaseControllerOf[T]) Unauthorized(msg string) error {
-	return ErrUnauthorized(msg)
+	return ErrUnauthorized(msg, nil)
 }
 
 // Forbidden returns a 403 AppError.
 func (c *BaseControllerOf[T]) Forbidden(msg string) error {
-	return ErrForbidden(msg)
+	return ErrForbidden(msg, nil)
 }
 
 // NotFound returns a 404 AppError.
 func (c *BaseControllerOf[T]) NotFound(msg string) error {
-	return ErrNotFound(msg)
+	return ErrNotFound(msg, nil)
 }
 
 // Conflict returns a 409 AppError.
 func (c *BaseControllerOf[T]) Conflict(msg string) error {
-	return ErrConflict(msg)
+	return ErrConflict(msg, nil)
 }
 
 // TooManyRequests returns a 429 AppError.
 func (c *BaseControllerOf[T]) TooManyRequests(msg string) error {
-	return ErrTooManyRequests(msg)
+	return ErrTooManyRequests(msg, nil)
 }
 
 // InternalError returns a 500 AppError.
@@ -285,17 +285,6 @@ func (c *BaseControllerOf[T]) Serve(ctx context.Context) error {
 
 func (c *BaseControllerOf[T]) Finalize(ctx context.Context) error {
 	return nil
-}
-
-// ResetController implements Resettable. It clears all base fields so the
-// instance can be safely returned to the per-route sync.Pool without a
-// reflect.Zero call.
-func (c *BaseControllerOf[T]) ResetController() {
-	c.request = nil
-	c.logger = nil
-	c.gcx = nil
-	var zero T
-	c.Request = zero
 }
 
 func (c *BaseControllerOf[T]) GetRequest() T {
@@ -332,7 +321,7 @@ func (c *BaseControllerOf[T]) parseBody() error {
 			if err != nil {
 				return err
 			}
-			c.gcx.RawBody = rawBody
+			c.gcx.rawBody = rawBody
 			httpReq.Body = io.NopCloser(bytes.NewBuffer(rawBody))
 		}
 	}
@@ -340,81 +329,57 @@ func (c *BaseControllerOf[T]) parseBody() error {
 	return err
 }
 
-func (c *BaseControllerOf[T]) ServeRawData(data any) {
-	c.gcx.ServeRawData(data)
+func (c *BaseControllerOf[T]) JSON(code int, data any) error {
+	return c.gcx.JSON(code, data)
 }
 
-func (c *BaseControllerOf[T]) ServeJSON(data any) error {
-	jsonData, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	c.gcx.ServeJSON(jsonData)
-	return nil
+func (c *BaseControllerOf[T]) String(code int, s string) error {
+	return c.gcx.String(code, s)
 }
 
-func (c *BaseControllerOf[T]) ServeHTML(html string) {
-	c.gcx.ServeHTML(html)
+func (c *BaseControllerOf[T]) Bytes(code int, data []byte) error {
+	return c.gcx.Bytes(code, data)
 }
 
-func (c *BaseControllerOf[T]) ServeSSE() *SSEWriter {
+func (c *BaseControllerOf[T]) HTML(code int, html string) error {
+	return c.gcx.HTML(code, html)
+}
+
+func (c *BaseControllerOf[T]) SSE() *SSEWriter {
 	return c.gcx.SSEWriter()
 }
 
 func (c *BaseControllerOf[T]) QueryInt(key string, def int) int {
-	params := c.request.URL.Query()
-	if vals, ok := params[key]; ok {
-		if ival, err := strconv.Atoi(vals[0]); err == nil {
-			return ival
-		}
-	}
-	return def
+	return parseValue(c.queryValue(key), def, strconv.Atoi)
 }
 
 func (c *BaseControllerOf[T]) QueryInt64(key string, def int64) int64 {
-	params := c.request.URL.Query()
-	if vals, ok := params[key]; ok {
-		if ival, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
-			return ival
-		}
-	}
-	return def
+	return parseValue(c.queryValue(key), def, func(s string) (int64, error) {
+		return strconv.ParseInt(s, 10, 64)
+	})
 }
 
 func (c *BaseControllerOf[T]) QueryFloat32(key string, def float32) float32 {
-	params := c.request.URL.Query()
-	if vals, ok := params[key]; ok {
-		if fval, err := strconv.ParseFloat(vals[0], 32); err == nil {
-			return float32(fval)
-		}
-	}
-	return def
+	return parseValue(c.queryValue(key), def, func(s string) (float32, error) {
+		v, err := strconv.ParseFloat(s, 32)
+		return float32(v), err
+	})
 }
 
 func (c *BaseControllerOf[T]) QueryFloat64(key string, def float64) float64 {
-	params := c.request.URL.Query()
-	if vals, ok := params[key]; ok {
-		if fval, err := strconv.ParseFloat(vals[0], 64); err == nil {
-			return fval
-		}
-	}
-	return def
+	return parseValue(c.queryValue(key), def, func(s string) (float64, error) {
+		return strconv.ParseFloat(s, 64)
+	})
 }
 
 func (c *BaseControllerOf[T]) QueryString(key string, def string) string {
-	params := c.request.URL.Query()
-	if vals, ok := params[key]; ok {
-		return vals[0]
-	}
-	return def
+	return parseValue(c.queryValue(key), def, func(s string) (string, error) {
+		return s, nil
+	})
 }
 
 func (c *BaseControllerOf[T]) QueryBool(key string, def bool) bool {
-	params := c.request.URL.Query()
-	if vals, ok := params[key]; ok {
-		return vals[0] == "1" || strings.ToLower(vals[0]) == "true"
-	}
-	return def
+	return parseValue(c.queryValue(key), def, parseBool)
 }
 
 func (c *BaseControllerOf[T]) forms() (map[string][]string, error) {
@@ -436,78 +401,74 @@ func (c *BaseControllerOf[T]) forms() (map[string][]string, error) {
 	return nil, nil
 }
 
-func (c *BaseControllerOf[T]) FormString(key string, def string) string {
-	params, err := c.forms()
+func parseValue[T any](value string, def T, parse func(string) (T, error)) T {
+	if value == "" {
+		return def
+	}
+	parsed, err := parse(value)
 	if err != nil {
 		return def
+	}
+	return parsed
+}
+
+func parseBool(value string) (bool, error) {
+	return value == "1" || strings.ToLower(value) == "true", nil
+}
+
+func (c *BaseControllerOf[T]) queryValue(key string) string {
+	if vals, ok := c.request.URL.Query()[key]; ok && len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
+}
+
+func (c *BaseControllerOf[T]) formValue(key string) string {
+	params, err := c.forms()
+	if err != nil {
+		return ""
 	}
 	if vals, ok := params[key]; ok && len(vals) > 0 {
 		return vals[0]
 	}
-	return def
+	return ""
+}
+
+func (c *BaseControllerOf[T]) pathValue(key string) string {
+	return c.request.PathValue(key)
+}
+
+func (c *BaseControllerOf[T]) FormString(key string, def string) string {
+	return parseValue(c.formValue(key), def, func(s string) (string, error) {
+		return s, nil
+	})
 }
 
 func (c *BaseControllerOf[T]) FormInt(key string, def int) int {
-	params, err := c.forms()
-	if err != nil {
-		return def
-	}
-	if vals, ok := params[key]; ok && len(vals) > 0 {
-		if ival, err := strconv.Atoi(vals[0]); err == nil {
-			return ival
-		}
-	}
-	return def
+	return parseValue(c.formValue(key), def, strconv.Atoi)
 }
 
 func (c *BaseControllerOf[T]) FormInt64(key string, def int64) int64 {
-	params, err := c.forms()
-	if err != nil {
-		return def
-	}
-	if vals, ok := params[key]; ok && len(vals) > 0 {
-		if ival, err := strconv.ParseInt(vals[0], 10, 64); err == nil {
-			return ival
-		}
-	}
-	return def
+	return parseValue(c.formValue(key), def, func(s string) (int64, error) {
+		return strconv.ParseInt(s, 10, 64)
+	})
 }
 
 func (c *BaseControllerOf[T]) FormFloat32(key string, def float32) float32 {
-	params, err := c.forms()
-	if err != nil {
-		return def
-	}
-	if vals, ok := params[key]; ok && len(vals) > 0 {
-		if fval, err := strconv.ParseFloat(vals[0], 32); err == nil {
-			return float32(fval)
-		}
-	}
-	return def
+	return parseValue(c.formValue(key), def, func(s string) (float32, error) {
+		v, err := strconv.ParseFloat(s, 32)
+		return float32(v), err
+	})
 }
 
 func (c *BaseControllerOf[T]) FormFloat64(key string, def float64) float64 {
-	params, err := c.forms()
-	if err != nil {
-		return def
-	}
-	if vals, ok := params[key]; ok && len(vals) > 0 {
-		if fval, err := strconv.ParseFloat(vals[0], 64); err == nil {
-			return fval
-		}
-	}
-	return def
+	return parseValue(c.formValue(key), def, func(s string) (float64, error) {
+		return strconv.ParseFloat(s, 64)
+	})
 }
 
 func (c *BaseControllerOf[T]) FormBool(key string, def bool) bool {
-	params, err := c.forms()
-	if err != nil {
-		return def
-	}
-	if vals, ok := params[key]; ok && len(vals) > 0 {
-		return vals[0] == "1" || strings.ToLower(vals[0]) == "true"
-	}
-	return def
+	return parseValue(c.formValue(key), def, parseBool)
 }
 
 func (c *BaseControllerOf[T]) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
@@ -515,53 +476,36 @@ func (c *BaseControllerOf[T]) FormFile(key string) (multipart.File, *multipart.F
 }
 
 func (c *BaseControllerOf[T]) PathValueString(key string, def string) string {
-	if val := c.request.PathValue(key); val != "" {
-		return val
-	}
-	return def
+	return parseValue(c.pathValue(key), def, func(s string) (string, error) {
+		return s, nil
+	})
 }
 
 func (c *BaseControllerOf[T]) PathValueInt(key string, def int) int {
-	if val := c.request.PathValue(key); val != "" {
-		if ival, err := strconv.Atoi(val); err == nil {
-			return ival
-		}
-	}
-	return def
+	return parseValue(c.pathValue(key), def, strconv.Atoi)
 }
 
 func (c *BaseControllerOf[T]) PathValueInt64(key string, def int64) int64 {
-	if val := c.request.PathValue(key); val != "" {
-		if ival, err := strconv.ParseInt(val, 10, 64); err == nil {
-			return ival
-		}
-	}
-	return def
+	return parseValue(c.pathValue(key), def, func(s string) (int64, error) {
+		return strconv.ParseInt(s, 10, 64)
+	})
 }
 
 func (c *BaseControllerOf[T]) PathValueFloat32(key string, def float32) float32 {
-	if val := c.request.PathValue(key); val != "" {
-		if fval, err := strconv.ParseFloat(val, 32); err == nil {
-			return float32(fval)
-		}
-	}
-	return def
+	return parseValue(c.pathValue(key), def, func(s string) (float32, error) {
+		v, err := strconv.ParseFloat(s, 32)
+		return float32(v), err
+	})
 }
 
 func (c *BaseControllerOf[T]) PathValueFloat64(key string, def float64) float64 {
-	if val := c.request.PathValue(key); val != "" {
-		if fval, err := strconv.ParseFloat(val, 64); err == nil {
-			return fval
-		}
-	}
-	return def
+	return parseValue(c.pathValue(key), def, func(s string) (float64, error) {
+		return strconv.ParseFloat(s, 64)
+	})
 }
 
 func (c *BaseControllerOf[T]) PathValueBool(key string, def bool) bool {
-	if val := c.request.PathValue(key); val != "" {
-		return val == "1" || strings.ToLower(val) == "true"
-	}
-	return def
+	return parseValue(c.pathValue(key), def, parseBool)
 }
 
 func (c *BaseControllerOf[T]) AddDebug(ctx context.Context, key string, value any) {

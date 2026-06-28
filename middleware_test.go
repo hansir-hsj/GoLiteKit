@@ -148,7 +148,7 @@ func TestMiddlewareQueue_Apply(t *testing.T) {
 		authMiddleware := Middleware(func(next Handler) Handler {
 			return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 				if r.Header.Get("Authorization") == "" {
-					return ErrUnauthorized("Unauthorized")
+					return ErrUnauthorized("Unauthorized", nil)
 				}
 				return next(ctx, w, r)
 			}

@@ -1,6 +1,7 @@
 package golitekit
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -8,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Services holds all external dependencies (DB, Redis, Logger, etc.)
+// Services holds framework dependencies and startup-registered custom services.
 type Services struct {
 	db                      *gorm.DB
 	redis                   *redis.Client
@@ -17,8 +18,8 @@ type Services struct {
 	observer                Observer
 	observabilityMiddleware Middleware
 
-	mu       sync.RWMutex
-	registry map[string]any
+	mu     sync.RWMutex
+	custom map[string]any
 }
 
 type ServiceOption func(*Services)
@@ -47,9 +48,9 @@ func WithObservabilityMiddleware(m Middleware) ServiceOption {
 	return func(s *Services) { s.observabilityMiddleware = m }
 }
 
-// WithService registers a named service in the generic registry.
+// WithService registers a named custom service during app construction.
 func WithService(key string, value any) ServiceOption {
-	return func(s *Services) { s.Set(key, value) }
+	return func(s *Services) { s.registerCustom(key, value) }
 }
 
 func (s *Services) DB() *gorm.DB {
@@ -94,22 +95,26 @@ func (s *Services) ObservabilityMiddleware() Middleware {
 	return s.observabilityMiddleware
 }
 
-// Set stores a named service.
-func (s *Services) Set(key string, value any) {
+func (s *Services) registerCustom(key string, value any) {
+	if key == "" {
+		panic("golitekit: service key must not be empty")
+	}
+	if value == nil {
+		panic(fmt.Sprintf("golitekit: service %q must not be nil", key))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.registry == nil {
-		s.registry = make(map[string]any)
+	if s.custom == nil {
+		s.custom = make(map[string]any)
 	}
-	s.registry[key] = value
+	s.custom[key] = value
 }
 
-// Get retrieves a named service.
-func (s *Services) Get(key string) any {
+func (s *Services) customService(key string) any {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.registry == nil {
+	if s.custom == nil {
 		return nil
 	}
-	return s.registry[key]
+	return s.custom[key]
 }

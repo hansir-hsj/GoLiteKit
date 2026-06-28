@@ -49,7 +49,7 @@ func TestErrBadRequest(t *testing.T) {
 }
 
 func TestErrUnauthorized(t *testing.T) {
-	err := ErrUnauthorized("please login")
+	err := ErrUnauthorized("please login", nil)
 
 	if err.Code != http.StatusUnauthorized {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusUnauthorized)
@@ -60,7 +60,7 @@ func TestErrUnauthorized(t *testing.T) {
 }
 
 func TestErrForbidden(t *testing.T) {
-	err := ErrForbidden("access denied")
+	err := ErrForbidden("access denied", nil)
 
 	if err.Code != http.StatusForbidden {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusForbidden)
@@ -71,7 +71,7 @@ func TestErrForbidden(t *testing.T) {
 }
 
 func TestErrNotFound(t *testing.T) {
-	err := ErrNotFound("user not found")
+	err := ErrNotFound("user not found", nil)
 
 	if err.Code != http.StatusNotFound {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusNotFound)
@@ -82,7 +82,7 @@ func TestErrNotFound(t *testing.T) {
 }
 
 func TestErrMethodNotAllowed(t *testing.T) {
-	err := ErrMethodNotAllowed("GET not allowed")
+	err := ErrMethodNotAllowed("GET not allowed", nil)
 
 	if err.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusMethodNotAllowed)
@@ -90,7 +90,7 @@ func TestErrMethodNotAllowed(t *testing.T) {
 }
 
 func TestErrConflict(t *testing.T) {
-	err := ErrConflict("resource exists")
+	err := ErrConflict("resource exists", nil)
 
 	if err.Code != http.StatusConflict {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusConflict)
@@ -98,7 +98,7 @@ func TestErrConflict(t *testing.T) {
 }
 
 func TestErrTooManyRequests(t *testing.T) {
-	err := ErrTooManyRequests("rate limited")
+	err := ErrTooManyRequests("rate limited", nil)
 
 	if err.Code != http.StatusTooManyRequests {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusTooManyRequests)
@@ -106,7 +106,7 @@ func TestErrTooManyRequests(t *testing.T) {
 }
 
 func TestErrTimeout(t *testing.T) {
-	err := ErrTimeout("request timeout")
+	err := ErrTimeout("request timeout", nil)
 
 	if err.Code != http.StatusRequestTimeout {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusRequestTimeout)
@@ -126,7 +126,7 @@ func TestErrInternal(t *testing.T) {
 }
 
 func TestErrServiceUnavailable(t *testing.T) {
-	err := ErrServiceUnavailable("service down")
+	err := ErrServiceUnavailable("service down", nil)
 
 	if err.Code != http.StatusServiceUnavailable {
 		t.Errorf("Code = %d, want %d", err.Code, http.StatusServiceUnavailable)
@@ -162,14 +162,12 @@ func TestAppError_Unwrap(t *testing.T) {
 	}
 }
 
-func TestOptionalInternalError(t *testing.T) {
-	// Without internal error
-	err1 := ErrUnauthorized("no internal")
+func TestExplicitInternalError(t *testing.T) {
+	err1 := ErrUnauthorized("no internal", nil)
 	if err1.Internal != nil {
 		t.Error("Internal should be nil when not provided")
 	}
 
-	// With internal error
 	internal := errors.New("cause")
 	err2 := ErrUnauthorized("with internal", internal)
 	if err2.Internal != internal {

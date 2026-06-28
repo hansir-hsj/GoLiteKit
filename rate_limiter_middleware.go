@@ -12,16 +12,19 @@ func (r *RateLimiter) RateLimiterAsMiddleware(keyFunc func(r *http.Request) stri
 		return func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
 			if r.enableGlobal && r.globalLimiter != nil {
 				if !r.globalLimiter.Allow() {
-					return ErrTooManyRequests("Global rate limit exceeded")
+					return ErrTooManyRequests("Global rate limit exceeded", nil)
 				}
 			}
 
 			if keyFunc != nil {
 				key := keyFunc(req)
-				limiter := r.GetLimiter(key)
+				limiter, ok := r.limiterForKey(key)
+				if !ok {
+					return ErrTooManyRequests("Rate limiter key capacity exceeded", nil)
+				}
 
 				if !limiter.Allow() {
-					return ErrTooManyRequests("Rate limit exceeded")
+					return ErrTooManyRequests("Rate limit exceeded", nil)
 				}
 			}
 

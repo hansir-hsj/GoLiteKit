@@ -1,8 +1,10 @@
 package golitekit
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -19,7 +21,7 @@ func TestPprof_NotMountedByDefault(t *testing.T) {
 
 func TestPprof_MountedExplicitly(t *testing.T) {
 	app := NewApp()
-	app.Router.MountPprof()
+	app.MountPprof()
 
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
@@ -29,6 +31,45 @@ func TestPprof_MountedExplicitly(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
+}
+
+func TestPprof_UsesCurrentMiddlewareAndFreezesUse(t *testing.T) {
+	executed := false
+	app := NewApp()
+	app.Use(func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			executed = true
+			return next(ctx, w, r)
+		}
+	})
+	app.MountPprof()
+
+	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	rec := httptest.NewRecorder()
+	app.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !executed {
+		t.Fatal("expected pprof route to run current middleware")
+	}
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected panic")
+		}
+		msg := recovered.(string)
+		if !strings.Contains(msg, "middleware must be registered before routes") {
+			t.Fatalf("panic = %q, want middleware ordering guidance", msg)
+		}
+	}()
+
+	app.Use(func(next Handler) Handler {
+		return next
+	})
 }
 
 func TestApp_MountPprof(t *testing.T) {
@@ -47,7 +88,7 @@ func TestApp_MountPprof(t *testing.T) {
 
 func TestPprof_LoopbackOnly_BlocksRemote(t *testing.T) {
 	app := NewApp()
-	app.Router.MountPprof(PprofOptions{LoopbackOnly: true})
+	app.MountPprof(PprofOptions{LoopbackOnly: true})
 
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
@@ -61,7 +102,7 @@ func TestPprof_LoopbackOnly_BlocksRemote(t *testing.T) {
 
 func TestPprof_LoopbackOnly_AllowsLocal(t *testing.T) {
 	app := NewApp()
-	app.Router.MountPprof(PprofOptions{LoopbackOnly: true})
+	app.MountPprof(PprofOptions{LoopbackOnly: true})
 
 	req := httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil)
 	req.RemoteAddr = "127.0.0.1:12345"

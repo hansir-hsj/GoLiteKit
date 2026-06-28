@@ -31,66 +31,38 @@ func ErrBadRequest(msg string, internal error) *AppError {
 }
 
 // ErrUnauthorized returns a 401 AppError.
-func ErrUnauthorized(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusUnauthorized, Message: msg, Internal: i}
+func ErrUnauthorized(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusUnauthorized, Message: msg, Internal: internal}
 }
 
 // ErrForbidden returns a 403 AppError.
-func ErrForbidden(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusForbidden, Message: msg, Internal: i}
+func ErrForbidden(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusForbidden, Message: msg, Internal: internal}
 }
 
 // ErrNotFound returns a 404 AppError.
-func ErrNotFound(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusNotFound, Message: msg, Internal: i}
+func ErrNotFound(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusNotFound, Message: msg, Internal: internal}
 }
 
 // ErrMethodNotAllowed returns a 405 AppError.
-func ErrMethodNotAllowed(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusMethodNotAllowed, Message: msg, Internal: i}
+func ErrMethodNotAllowed(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusMethodNotAllowed, Message: msg, Internal: internal}
 }
 
 // ErrConflict returns a 409 AppError.
-func ErrConflict(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusConflict, Message: msg, Internal: i}
+func ErrConflict(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusConflict, Message: msg, Internal: internal}
 }
 
 // ErrTooManyRequests returns a 429 AppError.
-func ErrTooManyRequests(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusTooManyRequests, Message: msg, Internal: i}
+func ErrTooManyRequests(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusTooManyRequests, Message: msg, Internal: internal}
 }
 
 // ErrTimeout returns a 408 AppError.
-func ErrTimeout(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusRequestTimeout, Message: msg, Internal: i}
+func ErrTimeout(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusRequestTimeout, Message: msg, Internal: internal}
 }
 
 // ErrInternal returns a 500 AppError.
@@ -99,12 +71,8 @@ func ErrInternal(msg string, internal error) *AppError {
 }
 
 // ErrServiceUnavailable returns a 503 AppError.
-func ErrServiceUnavailable(msg string, internal ...error) *AppError {
-	var i error
-	if len(internal) > 0 {
-		i = internal[0]
-	}
-	return &AppError{Code: http.StatusServiceUnavailable, Message: msg, Internal: i}
+func ErrServiceUnavailable(msg string, internal error) *AppError {
+	return &AppError{Code: http.StatusServiceUnavailable, Message: msg, Internal: internal}
 }
 
 // NewAppError returns an AppError with a custom status code.
