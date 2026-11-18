@@ -77,6 +77,9 @@ func ObserverFromContext(ctx context.Context) Observer {
 	return observer
 }
 
+// StartSpan starts a span with the request's observer, or returns a no-op span.
+// name must be a low-cardinality constant (e.g. "load user", not
+// "load user 42"): observers may use it as a metric label.
 func StartSpan(ctx context.Context, name string, attrs ...Attribute) (context.Context, Span) {
 	observer := ObserverFromContext(ctx)
 	if observer == nil {

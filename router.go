@@ -3,16 +3,28 @@ package golitekit
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
+	"sync"
 )
 
 // HandlerFunc is a lightweight handler that receives the request Context directly.
 type HandlerFunc func(ctx *Context) error
 
+// ControllerFactory creates a controller per request. Use it when the
+// controller needs per-request state:
+//
+//	app.GET("/users", glk.ControllerFactory(func() glk.Controller {
+//		return &UserController{repo: repo, seen: map[string]int{}}
+//	}))
+type ControllerFactory func() Controller
+
 type routeTarget struct {
 	controller Controller
+	factory    ControllerFactory
 	handler    HandlerFunc
 }
 
@@ -20,6 +32,10 @@ func newRouteTarget(c any) routeTarget {
 	switch h := c.(type) {
 	case Controller:
 		return routeTarget{controller: h}
+	case ControllerFactory:
+		return routeTarget{factory: h}
+	case func() Controller:
+		return routeTarget{factory: h}
 	case HandlerFunc:
 		return routeTarget{handler: h}
 	case func(*Context) error:
@@ -44,31 +60,63 @@ func isControllerValue(c any) bool {
 	return ptrType.Implements(reflect.TypeOf((*Controller)(nil)).Elem())
 }
 
-// Router handles route registration and middleware.
+// fallbackPattern matches every request no other route matches. It answers
+// with a JSON 404, or a JSON 405 plus an Allow header when the path is
+// registered for other methods.
+const fallbackPattern = "/"
+
+// probeMethods are the methods checked when building the Allow header.
+var probeMethods = []string{
+	http.MethodGet,
+	http.MethodHead,
+	http.MethodPost,
+	http.MethodPut,
+	http.MethodPatch,
+	http.MethodDelete,
+	http.MethodOptions,
+}
+
+// Router handles route registration and middleware. Paths use ServeMux
+// syntax: "/" matches every unmatched path, "/{$}" only the root.
 type Router struct {
 	mux              *http.ServeMux
-	registeredPaths  map[string]struct{} // tracks paths that already have a 405 catch-all
+	outerMiddlewares MiddlewareQueue
 	middlewares      MiddlewareQueue
 	services         *Services
 	routesRegistered bool
+
+	fallbackOnce sync.Once
+	fallback     http.Handler
 }
 
 // NewRouter creates a new Router.
 func NewRouter(services *Services) *Router {
-	return &Router{
-		mux:             http.NewServeMux(),
-		registeredPaths: make(map[string]struct{}),
-		middlewares:     NewMiddlewareQueue(),
-		services:        services,
+	r := &Router{
+		mux:         http.NewServeMux(),
+		middlewares: NewMiddlewareQueue(),
+		services:    services,
 	}
+	r.mux.Handle(fallbackPattern, http.HandlerFunc(r.serveUnmatched))
+	return r
 }
 
-// Use adds global middlewares.
+// Use adds global middlewares. They run after middlewares added with UseOuter.
 func (r *Router) Use(middlewares ...Middleware) *Router {
 	if r.routesRegistered {
 		panic("golitekit: middleware must be registered before routes")
 	}
 	r.middlewares.Use(middlewares...)
+	return r
+}
+
+// UseOuter adds middlewares that wrap the default stack, so their headers
+// (e.g. CORS) apply to error responses too. Their errors bypass the error
+// handler and are written as plain text.
+func (r *Router) UseOuter(middlewares ...Middleware) *Router {
+	if r.routesRegistered {
+		panic("golitekit: middleware must be registered before routes")
+	}
+	r.outerMiddlewares.Use(middlewares...)
 	return r
 }
 
@@ -96,27 +144,64 @@ func (r *Router) handle(method, path string, c any, groupMiddlewares MiddlewareQ
 	target := newRouteTarget(c)
 	handler := r.wrapRouteTarget(target, groupMiddlewares)
 
-	// Register the method-specific handler directly (Go 1.22+ pattern syntax).
+	// Go 1.22+ pattern syntax. Requests for this path with other methods fall
+	// through to the fallback, which answers 405 with an Allow header.
 	r.mux.Handle(method+" "+path, handler)
+}
 
-	// Register a path-only catch-all once per path to return a JSON 405.
-	if _, exists := r.registeredPaths[path]; !exists {
-		r.registeredPaths[path] = struct{}{}
-		appErr := ErrMethodNotAllowed("Method Not Allowed", nil)
-		body, _ := json.Marshal(Response{Status: appErr.Code, Msg: appErr.Message})
-		r.mux.Handle(path, r.wrapHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(appErr.Code)
-			_, _ = w.Write(body)
-		})))
+// serveUnmatched handles requests no route matched. The chain is built on
+// first use, so it includes every registered middleware.
+func (r *Router) serveUnmatched(w http.ResponseWriter, req *http.Request) {
+	r.fallbackOnce.Do(func() {
+		r.fallback = r.wrapHTTPHandler(http.HandlerFunc(r.writeUnmatched))
+	})
+	// The fallback is not a route; don't report it as "/".
+	unmatched := *req
+	unmatched.Pattern = ""
+	r.fallback.ServeHTTP(w, &unmatched)
+}
+
+func (r *Router) writeUnmatched(w http.ResponseWriter, req *http.Request) {
+	code := http.StatusNotFound
+	if allowed := r.allowedMethods(req); len(allowed) > 0 {
+		code = http.StatusMethodNotAllowed
+		w.Header().Set("Allow", strings.Join(allowed, ", "))
 	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(Response{
+		Status: code,
+		Msg:    http.StatusText(code),
+		LogID:  EnsureLogID(req.Context()),
+	})
+}
+
+// allowedMethods returns the methods for which a route other than the
+// fallback matches req's path.
+func (r *Router) allowedMethods(req *http.Request) []string {
+	var allowed []string
+	for _, method := range probeMethods {
+		if method == req.Method {
+			continue
+		}
+		probe := *req
+		probe.Method = method
+		if _, pattern := r.mux.Handler(&probe); pattern != "" && pattern != fallbackPattern {
+			allowed = append(allowed, method)
+		}
+	}
+	return allowed
 }
 
 func (r *Router) wrapRouteTarget(target routeTarget, groupMiddlewares MiddlewareQueue) http.Handler {
-	if target.handler != nil {
+	switch {
+	case target.handler != nil:
 		return r.wrapContextHandler(target.handler, groupMiddlewares)
+	case target.factory != nil:
+		return r.wrapController(target.factory, groupMiddlewares)
+	default:
+		return r.wrapController(prototypeFactory(target.controller), groupMiddlewares)
 	}
-	return r.wrapController(target.controller, groupMiddlewares)
 }
 
 func (r *Router) wrapContextHandler(fn HandlerFunc, groupMiddlewares MiddlewareQueue) http.Handler {
@@ -125,20 +210,30 @@ func (r *Router) wrapContextHandler(fn HandlerFunc, groupMiddlewares MiddlewareQ
 		if gcx == nil {
 			return fmt.Errorf("golitekit: context not initialized")
 		}
-		gcx.setContextOptions(withRequest(req), withResponseWriter(w))
-		return fn(gcx)
+		tw := &writeTracker{ResponseWriter: w}
+		gcx.setContextOptions(withRequest(req), withResponseWriter(tw))
+		if err := fn(gcx); err != nil {
+			return err
+		}
+		return writeStoredResponse(gcx, w, tw)
 	})
 
-	var prebuilt Handler = innerHandler
-	if len(groupMiddlewares) > 0 {
-		prebuilt = groupMiddlewares.Apply(prebuilt)
-	}
-	prebuilt = r.middlewares.Apply(prebuilt)
-
-	return r.wrapHandlerWithContext(prebuilt)
+	return r.wrapHandlerWithContext(r.applyMiddlewares(innerHandler, groupMiddlewares))
 }
 
-func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) http.Handler {
+// applyMiddlewares wraps h so that outer middlewares run first, then global,
+// then group middlewares.
+func (r *Router) applyMiddlewares(h Handler, groupMiddlewares MiddlewareQueue) Handler {
+	if len(groupMiddlewares) > 0 {
+		h = groupMiddlewares.Apply(h)
+	}
+	h = r.middlewares.Apply(h)
+	return r.outerMiddlewares.Apply(h)
+}
+
+// prototypeFactory copies the registered controller for each request. Map,
+// slice and pointer fields stay shared; the embedded Request is reset.
+func prototypeFactory(c Controller) ControllerFactory {
 	// Extract the concrete type once at registration time.
 	ctrlType := reflect.TypeOf(c)
 	if ctrlType.Kind() != reflect.Pointer || ctrlType.Elem().Kind() != reflect.Struct {
@@ -147,19 +242,32 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 	t := ctrlType.Elem()
 	prototype := reflect.ValueOf(c).Elem()
 
-	newController := func() Controller {
+	return func() Controller {
 		v := reflect.New(t)
 		v.Elem().Set(prototype)
-		return v.Interface().(Controller)
+		ctrl := v.Interface().(Controller)
+		if rr, ok := ctrl.(requestResetter); ok {
+			rr.resetRequest()
+		}
+		return ctrl
 	}
+}
 
+func (r *Router) wrapController(newController ControllerFactory, groupMiddlewares MiddlewareQueue) http.Handler {
 	// innerHandler is stable: built once at registration, not recreated per request.
 	innerHandler := Handler(func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
-		if gcx := GetContext(ctx); gcx != nil {
-			gcx.setContextOptions(withRequest(req), withResponseWriter(w))
+		// The stored response is written here, inside all middlewares, so
+		// ones that wrap the ResponseWriter (e.g. compression) see it.
+		tw := &writeTracker{ResponseWriter: w}
+		gcx := GetContext(ctx)
+		if gcx != nil {
+			gcx.setContextOptions(withRequest(req), withResponseWriter(tw))
 		}
 
 		handler := newController()
+		if handler == nil {
+			return ErrInternal("Internal Server Error", errors.New("golitekit: controller factory returned nil"))
+		}
 
 		// Call optional lifecycle hooks if implemented
 		if init, ok := handler.(Initializer); ok {
@@ -167,13 +275,10 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 				return WrapError(err, http.StatusInternalServerError)
 			}
 		}
-		// Parse before validation so Validate can inspect bound request data.
-		// Custom RequestParser implementations own request parsing; the router does
-		// not pre-read the request body. BaseControllerOf.ParseRequest handles the
-		// default JSON/form/multipart parsing path.
+		// Parse before Validate so it can inspect the bound request.
 		if parser, ok := handler.(RequestParser); ok {
 			if err := parser.ParseRequest(ctx); err != nil {
-				return WrapError(err, http.StatusBadRequest)
+				return requestParseError(err)
 			}
 		}
 		if val, ok := handler.(Validator); ok {
@@ -189,17 +294,11 @@ func (r *Router) wrapController(c Controller, groupMiddlewares MiddlewareQueue) 
 				return WrapError(err, http.StatusInternalServerError)
 			}
 		}
-		return nil
+		return writeStoredResponse(gcx, w, tw)
 	})
 
 	// Pre-apply the full middleware chain at registration time (not per-request).
-	var prebuilt Handler = innerHandler
-	if len(groupMiddlewares) > 0 {
-		prebuilt = groupMiddlewares.Apply(prebuilt)
-	}
-	prebuilt = r.middlewares.Apply(prebuilt)
-
-	return r.wrapHandlerWithContext(prebuilt)
+	return r.wrapHandlerWithContext(r.applyMiddlewares(innerHandler, groupMiddlewares))
 }
 
 func (r *Router) wrapHTTPHandler(handler http.Handler) http.Handler {
@@ -208,13 +307,15 @@ func (r *Router) wrapHTTPHandler(handler http.Handler) http.Handler {
 		return nil
 	})
 
-	prebuilt := r.middlewares.Apply(innerHandler)
-	return r.wrapHandlerWithContext(prebuilt)
+	return r.wrapHandlerWithContext(r.applyMiddlewares(innerHandler, nil))
 }
 
 func (r *Router) wrapHandlerWithContext(prebuilt Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		glkCtx := newContext(req)
+		if r.services != nil {
+			glkCtx.observer = r.services.Observer()
+		}
 		req = req.WithContext(glkCtx)
 
 		gcx := &glkCtx.gcx
@@ -223,10 +324,6 @@ func (r *Router) wrapHandlerWithContext(prebuilt Handler) http.Handler {
 			withResponseWriter(w),
 			withServices(r.services),
 		)
-		if r.services != nil && r.services.Observer() != nil {
-			req = req.WithContext(WithObserverContext(req.Context(), r.services.Observer()))
-			gcx.setContextOptions(withRequest(req))
-		}
 
 		// Errors propagate up through the middleware chain. ErrorHandlerMiddleware
 		// (when present) handles them; otherwise fall back to a plain HTTP error.
@@ -246,11 +343,12 @@ func (r *Router) Group(prefix string) *RouterGroup {
 	}
 }
 
-// Static serves static files.
+// Static serves files from fsPath under urlPath for GET and HEAD requests.
 func (r *Router) Static(urlPath, fsPath string) {
+	prefix := strings.TrimRight(urlPath, "/")
 	fs := http.FileServer(http.Dir(fsPath))
 	r.routesRegistered = true
-	r.mux.Handle(urlPath+"/", r.wrapHTTPHandler(http.StripPrefix(urlPath, fs)))
+	r.mux.Handle(http.MethodGet+" "+prefix+"/", r.wrapHTTPHandler(http.StripPrefix(prefix, fs)))
 }
 
 // Handler returns the http.Handler.

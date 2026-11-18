@@ -2,24 +2,28 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"os"
 	"os/signal"
 
 	kit "github.com/hansir-hsj/GoLiteKit"
-	"github.com/hansir-hsj/GoLiteKit/env"
 
 	"{{.Module}}/controller"
 )
 
 func main() {
-	app, err := kit.NewAppFromConfig("conf/app.toml")
+	configPath := flag.String("config", "conf/app.toml", "path to the app config file")
+	flag.Parse()
+
+	app, err := kit.NewAppFromConfig(*configPath)
 	if err != nil {
 		log.Fatalf("failed to create app: %v", err)
 	}
 
 	app.GET("/hello", &controller.HelloController{})
 
+	env := app.Env()
 	config := kit.ServerConfig{
 		Addr:              env.Addr(),
 		Network:           env.Network(),

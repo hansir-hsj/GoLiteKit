@@ -35,8 +35,8 @@ func WithPanicCallback(f func(r *http.Request, recovered any)) ErrorHandlerOptio
 	}
 }
 
-// ErrorHandlerMiddleware is the outermost middleware. It catches errors returned
-// by inner handlers and panics, writing appropriate JSON responses.
+// ErrorHandlerMiddleware turns returned errors and panics into JSON error
+// responses and returns nil; outer middlewares read the error via HandledError.
 func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
 	cfg := &errorHandlerConfig{
 		formatter: defaultErrorFormatter,
@@ -51,16 +51,25 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
 
 			defer func() {
 				if p := recover(); p != nil {
+					// http.ErrAbortHandler asks net/http to abort the response
+					// (e.g. httputil.ReverseProxy); it is not a bug to report.
+					if p == http.ErrAbortHandler {
+						panic(p)
+					}
+					// Once part of the response has been sent, only report the
+					// panic; writing a 500 now would corrupt the body.
+					writeResponse := !dw.responseSent()
 					dw.Reset()
-					handlePanic(w, r, p, cfg)
+					handlePanic(w, r, p, cfg, writeResponse)
 				}
 			}()
 
 			err := next(ctx, dw, r)
 
-			if err != nil && !dw.IsFlushed() {
+			if err != nil {
+				writeResponse := !dw.responseSent()
 				dw.Reset()
-				handleAppError(w, r, WrapError(err, http.StatusInternalServerError), cfg)
+				handleAppError(w, r, WrapError(err, http.StatusInternalServerError), cfg, writeResponse)
 				return nil
 			}
 
@@ -70,17 +79,25 @@ func ErrorHandlerMiddleware(opts ...ErrorHandlerOption) Middleware {
 	}
 }
 
-// handlePanic handles panic and returns 500 error.
-func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *errorHandlerConfig) {
+// handlePanic reports a recovered panic and, if writeResponse is set, writes a 500 error.
+func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *errorHandlerConfig, writeResponse bool) {
 	ctx := r.Context()
 	logID := EnsureLogID(ctx)
 
-	if gcx := GetContext(ctx); gcx != nil && gcx.PanicLogger() != nil {
-		gcx.PanicLogger().Report(ctx, recovered)
+	gcx := GetContext(ctx)
+	if gcx != nil {
+		gcx.setHandledError(ErrInternal("Internal Server Error", panicError{value: recovered}))
+		if gcx.PanicLogger() != nil {
+			gcx.PanicLogger().Report(ctx, recovered)
+		}
 	}
 
 	if cfg.onPanic != nil {
 		cfg.onPanic(r, recovered)
+	}
+
+	if !writeResponse {
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -94,25 +111,34 @@ func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *err
 	json.NewEncoder(w).Encode(resp)
 }
 
-// handleAppError handles business errors.
-func handleAppError(w http.ResponseWriter, r *http.Request, err *AppError, cfg *errorHandlerConfig) {
+// handleAppError reports a business error and, if writeResponse is set, renders it.
+func handleAppError(w http.ResponseWriter, r *http.Request, err *AppError, cfg *errorHandlerConfig, writeResponse bool) {
 	ctx := r.Context()
 	logID := EnsureLogID(ctx)
+
+	if gcx := GetContext(ctx); gcx != nil {
+		gcx.setHandledError(err)
+	}
 
 	if cfg.onError != nil {
 		cfg.onError(r, err)
 	}
 
+	if !writeResponse {
+		return
+	}
+
 	cfg.formatter(w, err, logID)
 }
 
-// defaultErrorFormatter formats error as JSON response.
+// defaultErrorFormatter writes err as the JSON envelope with HTTP status
+// err.Code and "status" set to err.ResponseStatus().
 func defaultErrorFormatter(w http.ResponseWriter, err *AppError, logID string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(err.Code)
 
 	resp := Response{
-		Status: err.Code,
+		Status: err.ResponseStatus(),
 		Msg:    err.Message,
 		LogID:  logID,
 	}

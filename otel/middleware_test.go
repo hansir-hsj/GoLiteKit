@@ -12,11 +12,13 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/logger"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type deadlineRecorder struct {
@@ -142,9 +144,113 @@ func TestMiddlewareMarksServerError(t *testing.T) {
 		t.Fatalf("span status = %v, want %v", span.Status.Code, codes.Error)
 	}
 	assertSpanAttr(t, span.Attributes, string(semconv.HTTPResponseStatusCodeKey), int64(http.StatusInternalServerError))
+	assertSpanAttr(t, span.Attributes, string(semconv.ErrorTypeKey), "500")
 	if len(span.Events) == 0 {
 		t.Fatalf("expected recorded error event")
 	}
+}
+
+// Without an error handler inside, a panic passes through the middleware but
+// is still recorded.
+func TestMiddlewareRecordsPanicAndRepanics(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	observer := NewObserver(WithTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))))
+	handler := Middleware(observer)(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		panic("boom")
+	})
+
+	func() {
+		defer func() {
+			if p := recover(); p != "boom" {
+				t.Fatalf("recovered %v, want the original panic", p)
+			}
+		}()
+		handler(context.Background(), httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+	}()
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 || spans[0].Status.Code != codes.Error {
+		t.Fatalf("spans = %+v, want one error span", spans)
+	}
+	assertSpanAttr(t, spans[0].Attributes, string(semconv.HTTPResponseStatusCodeKey), int64(http.StatusInternalServerError))
+}
+
+func TestMiddlewareJoinsIncomingTraceAsServerSpan(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	observer := NewObserver(WithTracerProvider(provider))
+	middleware := Middleware(observer, WithPropagator(propagation.TraceContext{}))
+
+	const traceID = "4bf92f3577b34da6a3ce929d0e0e4736"
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set("traceparent", "00-"+traceID+"-00f067aa0ba902b7-01")
+	handler := middleware(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		return nil
+	})
+	if err := handler(context.Background(), httptest.NewRecorder(), req); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("expected 1 span, got %d", len(spans))
+	}
+	if got := spans[0].SpanContext.TraceID().String(); got != traceID {
+		t.Fatalf("trace id = %s, want %s", got, traceID)
+	}
+	if !spans[0].Parent.IsRemote() {
+		t.Fatal("expected remote parent span context")
+	}
+	if spans[0].SpanKind != trace.SpanKindServer {
+		t.Fatalf("span kind = %v, want server", spans[0].SpanKind)
+	}
+}
+
+func TestSpanEndIsIdempotent(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	observer := NewObserver(WithMeterProvider(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))))
+	_, span := observer.StartSpan(context.Background(), "op")
+	span.End()
+	span.End()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect metrics: %v", err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if m.Name != "glk.service.span.calls" {
+				continue
+			}
+			sum := m.Data.(metricdata.Sum[int64])
+			if len(sum.DataPoints) != 1 || sum.DataPoints[0].Value != 1 {
+				t.Fatalf("span calls = %+v, want a single count of 1", sum.DataPoints)
+			}
+			return
+		}
+	}
+	t.Fatal("glk.service.span.calls not recorded")
+}
+
+func TestMiddlewareRecordsFinalStatusAfterInformational(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	middleware := Middleware(NewObserver(WithTracerProvider(provider)))
+
+	handler := middleware(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Link", "</a.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.WriteHeader(http.StatusCreated)
+		return nil
+	})
+	if err := handler(context.Background(), httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil)); err != nil {
+		t.Fatal(err)
+	}
+	spans := exporter.GetSpans()
+	if len(spans) != 1 {
+		t.Fatalf("spans = %d", len(spans))
+	}
+	assertSpanAttr(t, spans[0].Attributes, string(semconv.HTTPResponseStatusCodeKey), int64(http.StatusCreated))
 }
 
 func TestRoutePattern(t *testing.T) {
@@ -155,9 +261,11 @@ func TestRoutePattern(t *testing.T) {
 		pattern string
 		want    string
 	}{
-		{name: "falls back to URL path", method: http.MethodGet, path: "/users/123", want: "/users/123"},
+		{name: "empty without mux pattern", method: http.MethodGet, path: "/users/123", want: ""},
 		{name: "trims method prefix", method: http.MethodGet, path: "/users/123", pattern: "GET /users/{id}", want: "/users/{id}"},
 		{name: "keeps non-prefixed pattern", method: http.MethodGet, path: "/users/123", pattern: "/users/{id}", want: "/users/{id}"},
+		{name: "HEAD matched by GET pattern", method: http.MethodHead, path: "/users/123", pattern: "GET /users/{id}", want: "/users/{id}"},
+		{name: "strips host", method: http.MethodGet, path: "/users/123", pattern: "GET example.com/users/{id}", want: "/users/{id}"},
 	}
 
 	for _, tt := range tests {

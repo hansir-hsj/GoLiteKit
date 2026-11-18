@@ -92,12 +92,16 @@ func buildOptions(cfg *Config) redis.Options {
 	return opts
 }
 
-// NewFromConfig creates a new Redis client from config file
+// NewFromConfig creates a Redis client from a config file. Without an argument
+// it uses [HttpServer.Redis] configFile of the default env, or redis.toml in ConfDir.
 func NewFromConfig(conf ...string) (*redis.Client, error) {
 	var redisConf string
-	if len(conf) > 0 {
+	switch {
+	case len(conf) > 0:
 		redisConf = conf[0]
-	} else {
+	case env.RedisConfigFile() != "":
+		redisConf = env.RedisConfigFile()
+	default:
 		redisConf = filepath.Join(env.ConfDir(), "redis.toml")
 	}
 
@@ -109,7 +113,9 @@ func NewFromConfig(conf ...string) (*redis.Client, error) {
 	opts := buildOptions(cfg)
 	rdb := redis.NewClient(&opts)
 
-	pong, err := rdb.Ping(context.Background()).Result()
+	ctx, cancel := context.WithTimeout(context.Background(), pingTimeout(opts))
+	defer cancel()
+	pong, err := rdb.Ping(ctx).Result()
 	if err != nil {
 		rdb.Close()
 		return nil, fmt.Errorf("redis ping error: %w", err)
@@ -120,6 +126,17 @@ func NewFromConfig(conf ...string) (*redis.Client, error) {
 	}
 
 	return rdb, nil
+}
+
+// DefaultPingTimeout bounds the startup ping when no dial/read timeout is configured.
+const DefaultPingTimeout = 5 * time.Second
+
+// pingTimeout allows for dialing and reading the reply.
+func pingTimeout(opts redis.Options) time.Duration {
+	if t := opts.DialTimeout + opts.ReadTimeout; t > 0 {
+		return t
+	}
+	return DefaultPingTimeout
 }
 
 // Close closes the Redis connection

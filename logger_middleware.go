@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/hansir-hsj/GoLiteKit/logger"
@@ -17,8 +18,8 @@ type LoggerOptions struct {
 	MaxBodyBytes    int64
 }
 
-// LoggerAsMiddleware logs each request and its outcome using logInst.
-// panicInst is optional; pass nil to skip panic logging.
+// LoggerAsMiddleware logs each request with logInst; panicInst may be nil.
+// Place it outside ErrorHandlerMiddleware so it logs the status actually sent.
 func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger, opts ...LoggerOptions) Middleware {
 	var opt LoggerOptions
 	if len(opts) > 0 {
@@ -35,6 +36,7 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger, op
 			logRespBody := opt.LogResponseBody
 
 			rw := newResponseCapture(w, logRespBody, opt.MaxBodyBytes)
+			completed := false
 			defer func() {
 				if logReqBody && r.Method != http.MethodGet && r.Method != http.MethodDelete {
 					if gcx != nil && len(gcx.rawBody) > 0 && isLoggableContentType(r.Header.Get("Content-Type")) {
@@ -42,29 +44,61 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger, op
 					}
 				}
 
-				if logRespBody && len(rw.body) > 0 {
-					logger.AddInfo(ctx, "response", sanitizeLoggedBody(rw.body, opt.MaxBodyBytes, rw.Header().Get("Content-Type")))
+				if logRespBody {
+					if body, total := rw.capturedBody(); len(body) > 0 {
+						logger.AddInfo(ctx, "response", sanitizeCapturedBody(body, total, opt.MaxBodyBytes, rw.Header().Get("Content-Type")))
+					}
 				}
 
-				logger.AddInfo(ctx, "status", rw.statusCode)
-
-				if rerr != nil {
-					if appErr, ok := rerr.(*AppError); ok {
-						logger.AddInfo(ctx, "err_code", appErr.Code)
-						logger.AddInfo(ctx, "err_message", appErr.Message)
-						if appErr.Internal != nil {
-							logger.AddInfo(ctx, "err_internal", sanitizeErrorMessage(appErr.Internal.Error(), opt.MaxBodyBytes))
-						}
-					}
+				if !completed {
+					// A panic is propagating: no inner middleware recovered it.
+					// Do not recover here; just record the request.
+					logger.AddInfo(ctx, "status", http.StatusInternalServerError)
 					if logInst != nil {
-						logInst.Warning(ctx, "request completed with error")
+						logInst.Error(ctx, "request panicked")
 					}
-				} else {
+					return
+				}
+
+				reqErr := rerr
+				if reqErr == nil {
+					reqErr = HandledError(ctx)
+				}
+				status := rw.status()
+				if reqErr != nil && !rw.headerWritten() {
+					// The error response will be written by an outer layer.
+					status = WrapError(reqErr, http.StatusInternalServerError).Code
+				}
+				logger.AddInfo(ctx, "status", status)
+
+				if reqErr == nil {
 					if logInst != nil {
 						logInst.Info(ctx, "succ")
 					}
+					return
 				}
 
+				var appErr *AppError
+				if errors.As(reqErr, &appErr) {
+					logger.AddInfo(ctx, "err_code", appErr.Code)
+					if appErr.Status != 0 {
+						logger.AddInfo(ctx, "biz_status", appErr.Status)
+					}
+					logger.AddInfo(ctx, "err_message", appErr.Message)
+					if appErr.Internal != nil {
+						logger.AddInfo(ctx, "err_internal", sanitizeErrorMessage(appErr.Internal.Error(), opt.MaxBodyBytes))
+					}
+				} else {
+					logger.AddInfo(ctx, "err_internal", sanitizeErrorMessage(reqErr.Error(), opt.MaxBodyBytes))
+				}
+				if logInst == nil {
+					return
+				}
+				if status >= http.StatusInternalServerError {
+					logInst.Error(ctx, "request completed with error")
+				} else {
+					logInst.Warning(ctx, "request completed with error")
+				}
 			}()
 
 			if gcx != nil {
@@ -73,9 +107,15 @@ func LoggerAsMiddleware(logInst logger.Logger, panicInst *logger.PanicLogger, op
 			}
 
 			logger.AddInfo(ctx, "method", r.Method)
-			logger.AddInfo(ctx, "url", sanitizeURL(r.URL))
+			if gcx != nil && gcx.request != nil && gcx.request.URL == r.URL {
+				// Reuse the Context's cached query parse.
+				logger.AddInfo(ctx, "url", sanitizeURLWithQuery(r.URL.Path, gcx.queryValues()))
+			} else {
+				logger.AddInfo(ctx, "url", sanitizeURL(r.URL))
+			}
 
 			rerr = next(ctx, rw, r)
+			completed = true
 			return
 		}
 	}

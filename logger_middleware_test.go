@@ -250,6 +250,23 @@ func TestLoggerSanitizeErrorMessage_RedactsSensitiveValues(t *testing.T) {
 	}
 }
 
+// Error text uses the same key rule as JSON bodies and query strings.
+func TestLoggerSanitizeErrorMessage_UsesSensitiveKeyRule(t *testing.T) {
+	input := `login failed: userPassword=p1, X-Api-Key: k2; user=bob author=ann`
+	result := sanitizeErrorMessage(input, DefaultLogBodyLimit)
+
+	for _, leaked := range []string{"p1", "k2"} {
+		if strings.Contains(result, leaked) {
+			t.Fatalf("error message leaked %q: %s", leaked, result)
+		}
+	}
+	for _, kept := range []string{"user=bob", "author=ann", "login failed"} {
+		if !strings.Contains(result, kept) {
+			t.Fatalf("non-sensitive %q missing: %s", kept, result)
+		}
+	}
+}
+
 func TestLoggerSanitizeResponseBody_RedactsJSON(t *testing.T) {
 	input := []byte(`{"data":{"refresh_token":"rt123","name":"alice"}}`)
 	result := sanitizeLoggedBody(input, DefaultLogBodyLimit, "application/json")

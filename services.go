@@ -17,6 +17,7 @@ type Services struct {
 	panicLogger             *logger.PanicLogger
 	observer                Observer
 	observabilityMiddleware Middleware
+	logIDOptions            LogIDOptions
 
 	mu     sync.RWMutex
 	custom map[string]any
@@ -24,10 +25,21 @@ type Services struct {
 
 type ServiceOption func(*Services)
 
+// WithLogIDOptions configures the LogIDMiddleware of the default App stack,
+// e.g. WithLogIDOptions(LogIDOptions{TrustIncoming: true}) behind a gateway
+// that always sets X-Request-ID.
+func WithLogIDOptions(opts LogIDOptions) ServiceOption {
+	return func(s *Services) { s.logIDOptions = opts }
+}
+
+// WithDB makes db available to handlers. The caller keeps ownership: the app
+// does not close it (register app.OnClose to close it with the app).
 func WithDB(db *gorm.DB) ServiceOption {
 	return func(s *Services) { s.db = db }
 }
 
+// WithRedis makes client available to handlers. The caller keeps ownership:
+// the app does not close it (register app.OnClose to close it with the app).
 func WithRedis(client *redis.Client) ServiceOption {
 	return func(s *Services) { s.redis = client }
 }

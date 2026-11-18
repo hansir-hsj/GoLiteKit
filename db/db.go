@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -14,12 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// DbTimeout values are in milliseconds.
 type DbTimeout struct {
 	Timeout      int `toml:"timeout"`
 	ReadTimeout  int `toml:"readTimeout"`
 	WriteTimeout int `toml:"writeTimeout"`
 }
 
+// DbConn configures the connection pool. ConnMaxLifeTime is in milliseconds.
 type DbConn struct {
 	MaxOpenConns    int `toml:"maxOpenConns"`
 	MaxIdleConns    int `toml:"maxIdleConns"`
@@ -27,20 +30,23 @@ type DbConn struct {
 }
 
 type DbConfig struct {
-	DSN      string `toml:"dsn"`
-	Username string `toml:"username"`
-	Password string `toml:"password"`
-	Protocol string `toml:"protocol"`
-	Host     string `toml:"host"`
-	Port     int    `toml:"port"`
-	Database string `toml:"database"`
-	Charset  string `toml:"charset"`
+	DSN       string `toml:"dsn"`
+	Username  string `toml:"username"`
+	Password  string `toml:"password"`
+	Protocol  string `toml:"protocol"`
+	Host      string `toml:"host"`
+	Port      int    `toml:"port"`
+	Database  string `toml:"database"`
+	Charset   string `toml:"charset"`
+	ParseTime bool   `toml:"parseTime"`
+
+	// Nested as [db.Timeout] and [db.Conn], matching db.toml.
+	DbTimeout `toml:"Timeout"`
+	DbConn    `toml:"Conn"`
 }
 
 type Config struct {
-	DbConfig  `toml:"db"`
-	DbTimeout `toml:"Timeout"`
-	DbConn    `toml:"Conn"`
+	DbConfig `toml:"db"`
 }
 
 func parse(conf string) (*Config, error) {
@@ -61,15 +67,20 @@ func parse(conf string) (*Config, error) {
 			params["charset"] = dbConfig.Charset
 		}
 
+		timeout := time.Duration(dbConfig.Timeout) * time.Millisecond
+		if timeout <= 0 {
+			timeout = DefaultConnectTimeout // the driver default is no dial timeout
+		}
 		mysqlConfig := mysql.Config{
 			User:                 dbConfig.Username,
 			Passwd:               dbConfig.Password,
 			Net:                  protocol,
 			Addr:                 fmt.Sprintf("%s:%d", dbConfig.Host, dbConfig.Port),
 			DBName:               dbConfig.Database,
-			Timeout:              time.Duration(dbConfig.Timeout) * time.Millisecond,
+			Timeout:              timeout,
 			ReadTimeout:          time.Duration(dbConfig.ReadTimeout) * time.Millisecond,
 			WriteTimeout:         time.Duration(dbConfig.WriteTimeout) * time.Millisecond,
+			ParseTime:            dbConfig.ParseTime,
 			AllowNativePasswords: true,
 			Params:               params,
 		}
@@ -79,12 +90,16 @@ func parse(conf string) (*Config, error) {
 	return &dbConfig, nil
 }
 
-// NewFromConfig creates a new database connection from config file
+// NewFromConfig opens a database from a config file. Without an argument it
+// uses [HttpServer.DB] configFile of the default env, or db.toml in ConfDir.
 func NewFromConfig(conf ...string) (*gorm.DB, error) {
 	var dbConf string
-	if len(conf) > 0 {
+	switch {
+	case len(conf) > 0:
 		dbConf = conf[0]
-	} else {
+	case env.DBConfigFile() != "":
+		dbConf = env.DBConfigFile()
+	default:
 		dbConf = filepath.Join(env.ConfDir(), "db.toml")
 	}
 
@@ -93,14 +108,12 @@ func NewFromConfig(conf ...string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to parse db config: %w", err)
 	}
 
-	db, err := gorm.Open(mysqlDriver.Open(cfg.DSN), &gorm.Config{})
+	// Connect and ping with a timeout before handing the pool to gorm: gorm's
+	// own startup queries (automatic ping, SELECT VERSION()) use no context
+	// and would hang on an unresponsive server.
+	sqlDB, err := sql.Open("mysql", cfg.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
-	}
-
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get SQL database connection: %w", err)
 	}
 
 	if cfg.MaxOpenConns > 0 {
@@ -113,12 +126,32 @@ func NewFromConfig(conf ...string) (*gorm.DB, error) {
 		sqlDB.SetConnMaxLifetime(time.Duration(cfg.ConnMaxLifeTime) * time.Millisecond)
 	}
 
-	if err := sqlDB.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.pingTimeout())
+	defer cancel()
+	if err := sqlDB.PingContext(ctx); err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	db, err := gorm.Open(mysqlDriver.New(mysqlDriver.Config{Conn: sqlDB}), &gorm.Config{DisableAutomaticPing: true})
+	if err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("failed to open database connection: %w", err)
+	}
+
 	return db, nil
+}
+
+// DefaultConnectTimeout bounds connecting to and pinging the database when
+// no timeout is configured.
+const DefaultConnectTimeout = 5 * time.Second
+
+// pingTimeout is the configured connect timeout, or DefaultConnectTimeout.
+func (c *Config) pingTimeout() time.Duration {
+	if c.Timeout > 0 {
+		return time.Duration(c.Timeout) * time.Millisecond
+	}
+	return DefaultConnectTimeout
 }
 
 // Close closes the database connection

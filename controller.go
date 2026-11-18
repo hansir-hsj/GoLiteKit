@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"mime/multipart"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 
@@ -128,12 +127,9 @@ func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context) error {
 		return err
 	}
 
-	ct := c.request.Header.Get("Content-Type")
-
 	// Form types: parseBody already called ParseForm/ParseMultipartForm,
 	// so data is in request.Form — bind directly without checking body.
-	if strings.Contains(ct, "application/x-www-form-urlencoded") ||
-		strings.Contains(ct, "multipart/form-data") {
+	if mt := mediaType(c.request); mt == mediaTypeForm || mt == mediaTypeMultipart {
 		return c.bindFormData(&c.Request)
 	}
 
@@ -144,104 +140,34 @@ func (c *BaseControllerOf[T]) ParseRequest(ctx context.Context) error {
 	return json.Unmarshal(c.gcx.rawBody, &c.Request)
 }
 
-// bindFormData binds form data to a struct.
+// bindFormData binds form data to a struct; see bindForm.
 func (c *BaseControllerOf[T]) bindFormData(dst *T) error {
-	dstValue := reflect.ValueOf(dst)
-	if dstValue.Kind() != reflect.Pointer {
-		return fmt.Errorf("dst must be a pointer")
-	}
-
-	dstValue = dstValue.Elem()
-	if dstValue.Kind() != reflect.Struct {
-		return fmt.Errorf("dst must be a struct pointer")
-	}
-
-	dstType := dstValue.Type()
-
 	forms, err := c.forms()
 	if err != nil {
 		return err
 	}
-
-	for i := 0; i < dstValue.NumField(); i++ {
-		field := dstValue.Field(i)
-		fieldType := dstType.Field(i)
-
-		if !field.CanSet() {
-			continue
-		}
-
-		formTag := fieldType.Tag.Get("form")
-		if formTag == "" {
-			formTag = fieldType.Tag.Get("json")
-		}
-		if formTag == "" {
-			formTag = fieldType.Name
-		}
-
-		values, ok := forms[formTag]
-		if !ok || len(values) == 0 {
-			continue
-		}
-
-		value := values[0]
-
-		if err := c.setFieldValue(field, value); err != nil {
-			return fmt.Errorf("failed to set field %s: %w", fieldType.Name, err)
-		}
-	}
-
-	return nil
+	return bindForm(dst, forms)
 }
 
-// setFieldValue sets a struct field from string value.
-func (c *BaseControllerOf[T]) setFieldValue(field reflect.Value, value string) error {
-	switch field.Kind() {
-	case reflect.String:
-		field.SetString(value)
-
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		intVal, err := strconv.ParseInt(value, 10, 64)
-		if err != nil {
-			return err
+// requestParseError converts a ParseRequest error into a client error. Known
+// decoder and body-limit errors get a fixed message so Go type and field
+// internals are not echoed to the client; the cause is kept as Internal.
+func requestParseError(err error) *AppError {
+	var maxBytesErr *http.MaxBytesError
+	var syntaxErr *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &maxBytesErr):
+		return NewAppError(http.StatusRequestEntityTooLarge, "Request body too large", err)
+	case errors.As(err, &syntaxErr):
+		return ErrBadRequest("Invalid JSON body", err)
+	case errors.As(err, &typeErr):
+		if typeErr.Field != "" {
+			return ErrBadRequest(fmt.Sprintf("Invalid type for field %q", typeErr.Field), err)
 		}
-		field.SetInt(intVal)
-
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		uintVal, err := strconv.ParseUint(value, 10, 64)
-		if err != nil {
-			return err
-		}
-		field.SetUint(uintVal)
-
-	case reflect.Float32, reflect.Float64:
-		floatVal, err := strconv.ParseFloat(value, 64)
-		if err != nil {
-			return err
-		}
-		field.SetFloat(floatVal)
-
-	case reflect.Bool:
-		boolVal := value == "1" || strings.ToLower(value) == "true"
-		field.SetBool(boolVal)
-
-	case reflect.Ptr:
-		// Allocate a new value of the pointed-to type, parse the string into it,
-		// then point the field at the new value.  This supports optional fields
-		// declared as *string, *int64, *bool, etc.
-		elem := reflect.New(field.Type().Elem()).Elem()
-		if err := c.setFieldValue(elem, value); err != nil {
-			return err
-		}
-		ptr := reflect.New(field.Type().Elem())
-		ptr.Elem().Set(elem)
-		field.Set(ptr)
-
-	default:
-		return fmt.Errorf("unsupported field type: %v", field.Kind())
+		return ErrBadRequest("Invalid JSON body", err)
 	}
-
-	return nil
+	return WrapError(err, http.StatusBadRequest)
 }
 
 // BadRequest returns a 400 AppError. Use as: return c.BadRequest(...)
@@ -291,6 +217,21 @@ func (c *BaseControllerOf[T]) GetRequest() T {
 	return c.Request
 }
 
+// requestResetter is implemented by BaseControllerOf (and promoted to
+// controllers embedding it) so the router can clear Request on each
+// per-request copy of a controller prototype.
+type requestResetter interface {
+	resetRequest()
+}
+
+// resetRequest sets Request to its zero value. Request data must not be
+// preset on a registered prototype: the copy is shallow, so maps and slices
+// in it would be decoded into by concurrent requests. Set defaults in Init.
+func (c *BaseControllerOf[T]) resetRequest() {
+	var zero T
+	c.Request = zero
+}
+
 func (c *BaseControllerOf[T]) parseBody() error {
 	maxMemorySize := c.MaxMemorySize()
 	if maxMemorySize <= 0 {
@@ -305,12 +246,10 @@ func (c *BaseControllerOf[T]) parseBody() error {
 	httpReq.Body = http.MaxBytesReader(c.gcx.responseWriter, c.request.Body, maxBodySize)
 
 	var err error
-	ct := c.request.Header.Get("Content-Type")
-
-	switch {
-	case strings.HasPrefix(ct, "application/x-www-form-urlencoded"):
+	switch mediaType(c.request) {
+	case mediaTypeForm:
 		err = c.request.ParseForm()
-	case strings.HasPrefix(ct, "multipart/form-data"):
+	case mediaTypeMultipart:
 		err = c.request.ParseMultipartForm(maxMemorySize)
 	default:
 		if httpReq.Body != nil {
@@ -383,16 +322,10 @@ func (c *BaseControllerOf[T]) QueryBool(key string, def bool) bool {
 }
 
 func (c *BaseControllerOf[T]) forms() (map[string][]string, error) {
-	ct := c.request.Header.Get("Content-Type")
-	ct, _, err := mime.ParseMediaType(ct)
-	if err != nil {
-		return nil, err
-	}
-
-	switch ct {
-	case "application/x-www-form-urlencoded":
+	switch mediaType(c.request) {
+	case mediaTypeForm:
 		return c.request.Form, nil
-	case "multipart/form-data":
+	case mediaTypeMultipart:
 		if c.request.MultipartForm != nil {
 			return c.request.MultipartForm.Value, nil
 		}
@@ -412,15 +345,26 @@ func parseValue[T any](value string, def T, parse func(string) (T, error)) T {
 	return parsed
 }
 
+// parseBool accepts the strconv.ParseBool forms (1/t/true/0/f/false, any
+// case) plus on/off, which HTML checkboxes submit; other values are errors, so
+// the *Bool helpers return the default.
 func parseBool(value string) (bool, error) {
-	return value == "1" || strings.ToLower(value) == "true", nil
+	switch strings.ToLower(value) {
+	case "on":
+		return true, nil
+	case "off":
+		return false, nil
+	}
+	return strconv.ParseBool(value)
 }
 
+// queryValue returns the first value of key, using the request Context's
+// cached query parse.
 func (c *BaseControllerOf[T]) queryValue(key string) string {
-	if vals, ok := c.request.URL.Query()[key]; ok && len(vals) > 0 {
-		return vals[0]
+	if c.gcx != nil {
+		return c.gcx.Query(key)
 	}
-	return ""
+	return c.request.URL.Query().Get(key)
 }
 
 func (c *BaseControllerOf[T]) formValue(key string) string {
@@ -552,6 +496,8 @@ func (c *BaseControllerOf[T]) Warning(ctx context.Context, format string, args .
 	}
 }
 
+// Fatal logs at FATAL level and returns; it does not exit the process (see
+// logger.Logger). Return an error from Serve to end the request.
 func (c *BaseControllerOf[T]) Fatal(ctx context.Context, format string, args ...any) {
 	if c.logger != nil {
 		c.logger.Fatal(ctx, format, args...)

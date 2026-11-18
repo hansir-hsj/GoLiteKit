@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -180,6 +181,69 @@ func TestTimeoutMiddleware_ExplicitSSETimeout(t *testing.T) {
 
 	if err := mw(inner)(ctx, rec, req); err != nil {
 		t.Fatalf("middleware error = %v", err)
+	}
+}
+
+func TestTimeoutMiddleware_SSEExtendsWriteDeadline(t *testing.T) {
+	mw := TimeoutMiddleware(TimeoutOptions{Duration: time.Second, SSETimeout: 5 * time.Minute})
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		return NewSSEWriter(w).Send(SSEvent{Data: "hi"})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	req.Header.Set("Accept", "text/event-stream, */*")
+	ctx := withContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	if err := mw(inner)(ctx, rec, req); err != nil {
+		t.Fatalf("middleware error = %v", err)
+	}
+	if remaining := time.Until(rec.writeDeadline); remaining < 4*time.Minute {
+		t.Fatalf("write deadline remaining = %v, want about SSETimeout", remaining)
+	}
+}
+
+// The Accept header alone must not lift the write deadline: a client could
+// send it to any route.
+func TestTimeoutMiddleware_SSEAcceptWithoutStreamKeepsWriteDeadline(t *testing.T) {
+	mw := TimeoutMiddleware(TimeoutOptions{Duration: time.Second, SSETimeout: 5 * time.Minute})
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "application/json")
+		_, err := w.Write([]byte(`{}`))
+		return err
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.Header.Set("Accept", "text/event-stream")
+	ctx := withContext(req.Context())
+	req = req.WithContext(ctx)
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+
+	if err := mw(inner)(ctx, rec, req); err != nil {
+		t.Fatalf("middleware error = %v", err)
+	}
+	if !rec.writeDeadline.IsZero() {
+		t.Fatalf("write deadline changed to %v for a non-SSE response", rec.writeDeadline)
+	}
+}
+
+// A handler returning context.Cause(ctx) also timed out.
+func TestTimeoutMiddleware_CauseErrorIsTimeout(t *testing.T) {
+	mw := TimeoutMiddleware(TimeoutOptions{Duration: 10 * time.Millisecond})
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		<-ctx.Done()
+		return context.Cause(ctx)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
+	ctx := withContext(req.Context())
+	req = req.WithContext(ctx)
+
+	err := mw(inner)(ctx, httptest.NewRecorder(), req)
+	var appErr *AppError
+	if !errors.As(err, &appErr) || appErr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("err = %v, want 503", err)
 	}
 }
 

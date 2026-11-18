@@ -23,10 +23,8 @@ type Field struct {
 	Next  *Field
 }
 
-// LoggerContext holds per-request structured log fields that are attached to
-// every log record emitted within the request's context.  It is safe for
-// concurrent use: multiple goroutines (e.g. the handler goroutine and deferred
-// middleware cleanup after a timeout) may call add() and Handle() in parallel.
+// LoggerContext holds per-request log fields added to every record. It is
+// safe for concurrent use.
 type LoggerContext struct {
 	mu   sync.RWMutex
 	Head *Field
@@ -67,8 +65,9 @@ func (h ContextHandler) Handle(ctx context.Context, r slog.Record) error {
 	if logCtx, ok := ctx.Value(LoggerKey).(*LoggerContext); ok {
 		logCtx.mu.RLock()
 		for node := logCtx.Head; node != nil; node = node.Next {
-			// skip lower level field
-			if node.Level < r.Level {
+			// A field is attached to records at or above its own level, so
+			// Info fields (e.g. logid) also appear on Warning/Error records.
+			if r.Level < node.Level {
 				continue
 			}
 			attr := slog.Attr{
@@ -143,6 +142,8 @@ func AddWarning(ctx context.Context, key string, value any) {
 	addLog(ctx, LevelWarning, key, value)
 }
 
+// AddFatal adds a field attached only to FATAL records. Fatal records do not
+// exit the process; see Logger.
 func AddFatal(ctx context.Context, key string, value any) {
 	addLog(ctx, LevelFatal, key, value)
 }

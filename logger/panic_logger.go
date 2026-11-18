@@ -3,11 +3,10 @@ package logger
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strconv"
-	"strings"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -17,14 +16,21 @@ type PanicLogger struct {
 	filePath   string
 	file       *os.File
 	lastRotate time.Time
+	nextRotate time.Time // zero: never
+	closed     bool      // after Close, reports go to stderr and nothing rotates
 	mu         sync.Mutex
+
+	cleaner   *fileCleaner
+	closeOnce sync.Once
 }
 
+// NewPanicLogger creates a panic logger from the given config file. With no
+// argument or an empty path it writes to ./log/panic.log with daily rotation.
 func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 	var filePath string
 	var logConf *Config
 
-	if len(loggerConfig) == 0 {
+	if len(loggerConfig) == 0 || loggerConfig[0] == "" {
 		dir, err := os.Getwd()
 		if err != nil {
 			return nil, err
@@ -49,7 +55,8 @@ func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 		return nil, fmt.Errorf("failed to create panic log directory: %w", err)
 	}
 
-	if err := rotateExistingFileIfNeeded(filePath, logConf); err != nil {
+	rotated, err := rotateExistingFileIfNeeded(filePath, logConf)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: failed to rotate existing panic log file: %v\n", err)
 	}
 
@@ -58,141 +65,92 @@ func NewPanicLogger(loggerConfig ...string) (*PanicLogger, error) {
 		return nil, err
 	}
 
-	return &PanicLogger{
+	now := time.Now()
+	l := &PanicLogger{
 		logConf:    logConf,
 		filePath:   filePath,
 		file:       target,
-		lastRotate: time.Now(),
-	}, nil
+		lastRotate: now,
+		nextRotate: nextRotation(now, logConf.RotateRule),
+	}
+	if logConf.MaxFileNum > 0 {
+		l.cleaner = newFileCleaner(l.cleanOldFiles)
+	}
+	if rotated {
+		l.cleaner.kick()
+	}
+	return l, nil
 }
 
-func (l *PanicLogger) caller() string {
-	_, file, line, ok := runtime.Caller(4)
-	if !ok {
-		return ""
-	}
-	return strings.Join([]string{file, strconv.Itoa(line)}, ":")
-}
-
-func (l *PanicLogger) needRotate() bool {
-	if l.logConf == nil {
-		return false
-	}
-
-	now := time.Now()
-	last := l.lastRotate
-
-	switch l.logConf.RotateRule {
-	case "no":
-		return false
-	case "1min":
-		return truncateToMinute(last) != truncateToMinute(now)
-	case "5min":
-		return truncateToMinuteInterval(last, 5) != truncateToMinuteInterval(now, 5)
-	case "10min":
-		return truncateToMinuteInterval(last, 10) != truncateToMinuteInterval(now, 10)
-	case "30min":
-		return truncateToMinuteInterval(last, 30) != truncateToMinuteInterval(now, 30)
-	case "1hour":
-		return truncateToHour(last) != truncateToHour(now)
-	case "1day":
-		return truncateToDay(last) != truncateToDay(now)
-	}
-
-	return false
-}
-
-// rotate opens a new file first, then renames the old one, then swaps handles.
+// rotate archives the current file and reopens a fresh one. l.file is nil
+// if reopening failed; Report then falls back to stderr.
 func (l *PanicLogger) rotate() error {
-	newFilePath := l.newFilePath(l.lastRotate)
+	f, err := rotateFile(l.file, l.filePath, l.newFilePath(l.lastRotate))
 
-	// Step 1: Open new file first
-	newTarget, err := os.OpenFile(l.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	// Advance even on failure so a persistent error is not retried per report.
+	now := time.Now()
+	l.lastRotate = now
+	l.nextRotate = nextRotation(now, l.logConf.RotateRule)
+	l.file = f
+
 	if err != nil {
-		return fmt.Errorf("rotate: open new file failed: %w", err)
+		return fmt.Errorf("rotate: %w", err)
 	}
 
-	// Step 2: Close and rename old file
-	oldTarget := l.file
-	if err := oldTarget.Close(); err != nil {
-		newTarget.Close()
-		return fmt.Errorf("rotate: close failed: %w", err)
-	}
-	if err := os.Rename(l.filePath, newFilePath); err != nil {
-		newTarget.Close()
-		l.file, _ = os.OpenFile(l.filePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-		return fmt.Errorf("rotate: rename failed: %w", err)
-	}
-
-	// Step 3: Swap handle
-	l.file = newTarget
-	l.lastRotate = time.Now()
-
-	go l.cleanOldFiles()
+	l.cleaner.kick()
 
 	return nil
 }
 
 func (l *PanicLogger) cleanOldFiles() {
-	if l.logConf == nil || l.logConf.MaxFileNum <= 0 {
-		return
-	}
 	dir := filepath.Dir(l.filePath)
 	cleanOldLogFiles(dir, l.filePath, l.logConf.MaxFileNum)
 }
 
 func (l *PanicLogger) newFilePath(t time.Time) string {
-	if l.logConf == nil {
-		return l.filePath
-	}
-
-	switch l.logConf.RotateRule {
-	case "no":
-		return l.filePath
-	case "1min":
-		return l.filePath + "." + truncateToMinute(t).Format("20060102150405")
-	case "5min":
-		return l.filePath + "." + truncateToMinuteInterval(t, 5).Format("20060102150405")
-	case "10min":
-		return l.filePath + "." + truncateToMinuteInterval(t, 10).Format("20060102150405")
-	case "30min":
-		return l.filePath + "." + truncateToMinuteInterval(t, 30).Format("20060102150405")
-	case "1hour":
-		return l.filePath + "." + truncateToHour(t).Format("2006010215")
-	case "1day":
-		return l.filePath + "." + truncateToDay(t).Format("20060102")
-	}
-
-	return l.filePath
+	return archivePath(l.filePath, l.logConf.RotateRule, t)
 }
 
-// Report writes a panic record. Holds a single lock for both rotate check and write
-// to avoid a race window between rotateIfNeeded() and the write.
+// Report writes p with the current goroutine's stack. Call it from the
+// deferred function that recovered the panic.
 func (l *PanicLogger) Report(ctx context.Context, p any) {
+	// Capture before taking the lock; debug.Stack grows its buffer as needed,
+	// so deep stacks are not truncated.
+	stack := debug.Stack()
+
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if l.needRotate() {
+	if !l.closed && rotationDue(l.nextRotate, time.Now()) {
 		if err := l.rotate(); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to rotate panic log: %v\n", err)
 		}
 	}
 
 	msg := fmt.Sprintf("[%s] Recover from panic: %v", time.Now().Format("2006-01-02 15:04:05.000"), p)
-	stack := make([]byte, 4096)
-	length := runtime.Stack(stack, false)
-	stack = stack[:length]
 
-	if _, err := fmt.Fprintf(l.file, "%s\n%s\nStack:\n%s\n\n", msg, l.caller(), stack); err != nil {
+	var w io.Writer = os.Stderr
+	if l.file != nil {
+		w = l.file
+	}
+	if _, err := fmt.Fprintf(w, "%s\nStack:\n%s\n\n", msg, stack); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to write panic log: %v\n", err)
 	}
 }
 
+// Close closes the panic log file and waits for a pending cleanup to finish.
+// Only the first call does anything. Reports written afterwards go to stderr.
 func (l *PanicLogger) Close() error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.file != nil {
-		return l.file.Close()
-	}
-	return nil
+	var err error
+	l.closeOnce.Do(func() {
+		l.mu.Lock()
+		if l.file != nil {
+			err = l.file.Close()
+		}
+		l.file = nil
+		l.closed = true
+		l.mu.Unlock()
+		l.cleaner.close()
+	})
+	return err
 }

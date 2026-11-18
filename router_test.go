@@ -547,3 +547,102 @@ func TestControllerRequestTracksMiddlewareRequestContext(t *testing.T) {
 		t.Fatal("expected Context.Request to include middleware-updated context")
 	}
 }
+
+func TestRouter_MethodNotAllowedSetsAllowHeader(t *testing.T) {
+	r := NewRouter(nil)
+	r.GET("/items/{id}", &testController{})
+	r.PUT("/items/{id}", &testController{})
+
+	req := httptest.NewRequest(http.MethodPost, "/items/1", nil)
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	if got := rec.Header().Get("Allow"); got != "GET, HEAD, PUT" {
+		t.Fatalf("Allow = %q, want %q", got, "GET, HEAD, PUT")
+	}
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil || resp.Status != http.StatusMethodNotAllowed {
+		t.Fatalf("body = %q, want JSON 405", rec.Body.String())
+	}
+}
+
+func TestRouter_NotFoundIsJSON(t *testing.T) {
+	r := NewRouter(nil)
+	r.GET("/exists", &testController{})
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		req := httptest.NewRequest(method, "/missing", nil)
+		rec := httptest.NewRecorder()
+		r.Handler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s /missing status = %d, want 404", method, rec.Code)
+		}
+		if rec.Header().Get("Allow") != "" {
+			t.Fatalf("%s /missing should not set Allow", method)
+		}
+		if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+			t.Fatalf("Content-Type = %q, want JSON", rec.Header().Get("Content-Type"))
+		}
+	}
+}
+
+func TestRouter_SamePathDifferentParamNamesDoesNotPanic(t *testing.T) {
+	r := NewRouter(nil)
+	r.GET("/u/{id}", &testController{})
+	r.POST("/u/{uid}", &testController{})
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		rec := httptest.NewRecorder()
+		r.Handler().ServeHTTP(rec, httptest.NewRequest(method, "/u/1", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", method, rec.Code)
+		}
+	}
+}
+
+func TestRouter_StaticRejectsNonGET(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := NewRouter(nil)
+	r.Static("/static/", dir)
+
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/static/a.txt", nil))
+	if rec.Code != http.StatusOK || rec.Body.String() != "a" {
+		t.Fatalf("GET status = %d body = %q", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/static/a.txt", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want 405", rec.Code)
+	}
+}
+
+func TestRouter_UseOuterRunsBeforeErrorHandler(t *testing.T) {
+	r := NewRouter(nil)
+	r.UseOuter(func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			return next(ctx, w, req)
+		}
+	})
+	r.Use(ErrorHandlerMiddleware(), ContextAsMiddleware())
+	r.GET("/bad", func(ctx *Context) error { return ErrBadRequest("bad", nil) })
+
+	rec := httptest.NewRecorder()
+	r.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/bad", nil))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Fatal("outer middleware header was dropped from the error response")
+	}
+}

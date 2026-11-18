@@ -7,7 +7,9 @@ import (
 )
 
 type ConsoleLogger struct {
-	logger *slog.Logger
+	logger    *slog.Logger
+	opts      *slog.HandlerOptions
+	addSource bool
 }
 
 func (l *ConsoleLogger) Debug(ctx context.Context, msg string, args ...any) {
@@ -47,14 +49,16 @@ func NewConsoleLogger(opts *slog.HandlerOptions) (*ConsoleLogger, error) {
 	handler := newContextHandler(os.Stdout, LoggerTextFormat, opts)
 
 	return &ConsoleLogger{
-		logger: slog.New(handler),
+		logger:    slog.New(handler),
+		opts:      opts,
+		addSource: opts != nil && opts.AddSource,
 	}, nil
 }
 
 func (l *ConsoleLogger) log(ctx context.Context, level slog.Level, msg string, args ...any) {
-	if !l.logger.Enabled(ctx, level) {
+	if !levelEnabled(l.opts, level) {
 		return
 	}
 	// callerSkip=5: logRecord -> log -> logit -> Debug/Info/... -> user code
-	_ = logRecord(ctx, l.logger.Handler(), level, msg, 5, args...)
+	_ = logRecord(ctx, l.logger.Handler(), level, msg, 5, l.addSource, args...)
 }

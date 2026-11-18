@@ -137,6 +137,64 @@ func TestRestController_ServeErrorMsg(t *testing.T) {
 	}
 }
 
+func TestRestController_ServeErrorZeroStatusIsFailure(t *testing.T) {
+	ctx, rec := buildRestCtx(t)
+	c := &RestController{}
+	c.gcx = GetContext(ctx)
+
+	if err := c.ServeError(ctx, OK, "oops"); err != nil {
+		t.Fatalf("ServeError: %v", err)
+	}
+	renderContext(ctx, rec)
+
+	var resp Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Status != -1 {
+		t.Errorf("status = %d, want -1 (0 is reserved for success)", resp.Status)
+	}
+}
+
+func TestAppErrorBusinessStatusInErrorResponse(t *testing.T) {
+	logs := &recordLogger{}
+	app := NewApp(WithLogger(logs))
+	app.GET("/biz", func(ctx *Context) error {
+		return ErrBadRequest("invalid phone", nil).WithStatus(10012)
+	})
+	app.GET("/plain", func(ctx *Context) error {
+		return ErrNotFound("missing", nil)
+	})
+
+	// A slice keeps the request order, which the log assertions below rely on.
+	for _, tc := range []struct {
+		path string
+		want [2]int
+	}{
+		{"/biz", [2]int{http.StatusBadRequest, 10012}},
+		{"/plain", [2]int{http.StatusNotFound, http.StatusNotFound}},
+	} {
+		path, want := tc.path, tc.want
+		rec := httptest.NewRecorder()
+		app.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+
+		var resp Response
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("%s: unmarshal: %v", path, err)
+		}
+		if rec.Code != want[0] || resp.Status != want[1] {
+			t.Errorf("%s: got HTTP %d status %d, want HTTP %d status %d", path, rec.Code, resp.Status, want[0], want[1])
+		}
+	}
+
+	if got := logs.entries[0].fields["biz_status"]; got != 10012 {
+		t.Errorf("biz_status log field = %v, want 10012", got)
+	}
+	if _, ok := logs.entries[1].fields["biz_status"]; ok {
+		t.Error("biz_status should be absent when no business code is set")
+	}
+}
+
 func TestRestController_ServeData_IncludesLogID(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

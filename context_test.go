@@ -123,6 +123,72 @@ func TestSetContextData_GetContextData(t *testing.T) {
 	})
 }
 
+func runContextResponse(t *testing.T, handler func(gcx *Context, w http.ResponseWriter)) (*httptest.ResponseRecorder, error) {
+	t.Helper()
+	ctx := withContext(context.Background())
+	gcx := GetContext(ctx)
+	req := httptest.NewRequest("GET", "/test", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		gcx.setContextOptions(withRequest(r), withResponseWriter(w))
+		handler(gcx, w)
+		return nil
+	})
+	err := ContextAsMiddleware()(inner)(ctx, rec, req)
+	return rec, err
+}
+
+func TestContextAsMiddleware_LastResponseCallWins(t *testing.T) {
+	cases := []struct {
+		name     string
+		set      func(gcx *Context)
+		code     int
+		ctype    string
+		wantBody string
+	}{
+		{"HTML then JSON", func(gcx *Context) {
+			gcx.HTML(http.StatusOK, "<p>x</p>")
+			gcx.JSON(http.StatusCreated, map[string]int{"a": 1})
+		}, http.StatusCreated, "application/json", `{"a":1}`},
+		{"JSON then HTML", func(gcx *Context) {
+			gcx.JSON(http.StatusCreated, map[string]int{"a": 1})
+			gcx.HTML(http.StatusAccepted, "<p>x</p>")
+		}, http.StatusAccepted, "text/html; charset=UTF-8", "<p>x</p>"},
+		{"JSON then String", func(gcx *Context) {
+			gcx.JSON(http.StatusOK, 1)
+			gcx.String(http.StatusTeapot, "tea")
+		}, http.StatusTeapot, "text/plain; charset=UTF-8", "tea"},
+		{"empty HTML still sets status", func(gcx *Context) {
+			gcx.HTML(http.StatusAccepted, "")
+		}, http.StatusAccepted, "text/html; charset=UTF-8", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, err := runContextResponse(t, func(gcx *Context, w http.ResponseWriter) { tc.set(gcx) })
+			if err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if rec.Code != tc.code || rec.Header().Get("Content-Type") != tc.ctype || rec.Body.String() != tc.wantBody {
+				t.Fatalf("got %d %q %q, want %d %q %q", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String(), tc.code, tc.ctype, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestContextAsMiddleware_DirectWriteThenJSONDoesNotDuplicate(t *testing.T) {
+	rec, err := runContextResponse(t, func(gcx *Context, w http.ResponseWriter) {
+		w.Write([]byte("direct"))
+		gcx.JSON(http.StatusOK, map[string]bool{"ok": true})
+	})
+	if rec.Body.String() != "direct" {
+		t.Fatalf("body = %q, want only the direct write", rec.Body.String())
+	}
+	if err == nil {
+		t.Fatal("expected an error reporting the discarded response")
+	}
+}
+
 func TestContextAsMiddleware(t *testing.T) {
 	t.Run("writes JSON response", func(t *testing.T) {
 		ctx := withContext(context.Background())

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -16,25 +17,30 @@ import (
 
 const globalContextKey ContextKey = iota
 
-// glkContext embeds both the GoLiteKit Context and the logger's LoggerContext
-// by value, avoiding context.WithValue chain overhead for framework-owned keys.
+// glkContext holds the Context, LoggerContext and Observer by value, saving
+// a context.WithValue layer for each.
 type glkContext struct {
 	parent    context.Context
 	gcx       Context              // embedded by value — no separate allocation
 	loggerCtx logger.LoggerContext // embedded by value — no separate allocation
+	observer  Observer             // nil: look it up in parent
 }
 
 func (c *glkContext) Deadline() (time.Time, bool) { return c.parent.Deadline() }
 func (c *glkContext) Done() <-chan struct{}       { return c.parent.Done() }
 func (c *glkContext) Err() error                  { return c.parent.Err() }
 
-// Value answers the two framework-owned keys directly (O(1), no chain walk).
+// Value answers the framework-owned keys directly (O(1), no chain walk).
 func (c *glkContext) Value(key any) any {
 	switch key {
 	case globalContextKey:
 		return &c.gcx
 	case logger.LoggerKey:
 		return &c.loggerCtx
+	case observerContextKey{}:
+		if c.observer != nil {
+			return c.observer
+		}
 	}
 	return c.parent.Value(key)
 }
@@ -59,17 +65,50 @@ type Context struct {
 	panicLogger *logger.PanicLogger
 	services    *Services
 
-	rawResponse  any
-	jsonResponse any
-	rawHtml      string
-	statusCode   int
+	// response is the body set by JSON/String/Bytes/HTML; the last call wins.
+	response *bufferedResponse
 
 	sseWriter *SSEWriter
 
 	logID string
 
+	// handledErr is the error ErrorHandlerMiddleware turned into a response
+	// (or recovered from a panic), for outer middlewares such as logging.
+	handledErr *AppError
+
+	// query caches the parsed URL query (see Query); queryRaw is the raw
+	// query it was parsed from. Guarded by dataLock.
+	query    url.Values
+	queryRaw string
+
 	data     map[string]any
 	dataLock sync.RWMutex
+}
+
+// panicError wraps a recovered panic value.
+type panicError struct{ value any }
+
+func (e panicError) Error() string { return fmt.Sprintf("panic: %v", e.value) }
+
+func (gcx *Context) setHandledError(err *AppError) {
+	gcx.dataLock.Lock()
+	gcx.handledErr = err
+	gcx.dataLock.Unlock()
+}
+
+// HandledError returns the error ErrorHandlerMiddleware turned into a
+// response, or nil. A recovered panic is a 500 *AppError.
+func HandledError(ctx context.Context) error {
+	gcx := GetContext(ctx)
+	if gcx == nil {
+		return nil
+	}
+	gcx.dataLock.RLock()
+	defer gcx.dataLock.RUnlock()
+	if gcx.handledErr == nil {
+		return nil
+	}
+	return gcx.handledErr
 }
 
 type SSEvent struct {
@@ -223,81 +262,81 @@ func (ctx *Context) Service(key string) any {
 	return ctx.services.customService(key)
 }
 
-func (ctx *Context) setRawResponse(data any) {
-	ctx.rawResponse = data
+// bufferedResponse is a response body waiting to be written.
+type bufferedResponse struct {
+	statusCode  int
+	contentType string
+	body        []byte
 }
 
-func (ctx *Context) setJSONResponse(data any) {
-	ctx.jsonResponse = data
+// setResponse replaces any previously set response, so the last call to
+// JSON/String/Bytes/HTML wins regardless of which method it was.
+func (ctx *Context) setResponse(code int, contentType string, body []byte) {
+	ctx.response = &bufferedResponse{statusCode: code, contentType: contentType, body: body}
 }
 
-func (ctx *Context) setHTMLResponse(html string) {
-	ctx.rawHtml = html
+// errResponseAlreadyWritten reports a stored response that was dropped
+// because a body had already been written.
+func errResponseAlreadyWritten() *AppError {
+	return ErrInternal("response already written to ResponseWriter; response set by JSON/String/Bytes/HTML was discarded", nil)
 }
 
-// ContextAsMiddleware writes the buffered response stored in Context (via
-// JSON / String / HTML) after the inner handler returns.
-// Errors returned by the inner handler are propagated without writing a response.
+// writeStoredResponse writes and clears the stored response. A status already
+// passed to WriteHeader is kept.
+func writeStoredResponse(gcx *Context, w http.ResponseWriter, tw *writeTracker) error {
+	if gcx == nil || gcx.response == nil {
+		return nil
+	}
+	resp := gcx.response
+	gcx.response = nil
+	if tw.bodyStarted.Load() {
+		return errResponseAlreadyWritten()
+	}
+
+	statusCode := int(tw.status.Load())
+	if statusCode == 0 {
+		statusCode = resp.statusCode
+		if statusCode == 0 {
+			statusCode = http.StatusOK
+		}
+		w.Header().Set("Content-Type", resp.contentType)
+		w.WriteHeader(statusCode)
+	} else if w.Header().Get("Content-Type") == "" {
+		// Still effective when the status is deferred (ErrorHandlerMiddleware).
+		w.Header().Set("Content-Type", resp.contentType)
+	}
+	if !bodyAllowedForStatus(statusCode) {
+		return nil
+	}
+	if _, err := w.Write(resp.body); err != nil {
+		return ErrInternal("failed to write response", err)
+	}
+	return nil
+}
+
+// bodyAllowedForStatus mirrors net/http: 1xx, 204 and 304 responses have no body.
+func bodyAllowedForStatus(status int) bool {
+	switch {
+	case status >= 100 && status <= 199:
+		return false
+	case status == http.StatusNoContent, status == http.StatusNotModified:
+		return false
+	}
+	return true
+}
+
+// ContextAsMiddleware writes a response stored by a middleware that answers
+// without calling next (e.g. ctx.JSON(403, ...)). Routes write their own
+// stored response when they return, so a middleware cannot replace it after
+// next; such a response is dropped and an error returned.
 func ContextAsMiddleware() Middleware {
 	return func(next Handler) Handler {
 		return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-			err := next(ctx, w, r)
-			if err != nil {
+			tw := &writeTracker{ResponseWriter: w}
+			if err := next(ctx, tw, r); err != nil {
 				return err
 			}
-
-			gcx := GetContext(ctx)
-			if gcx == nil {
-				return nil
-			}
-
-			statusCode := http.StatusOK
-			if gcx.statusCode != 0 {
-				statusCode = gcx.statusCode
-			}
-
-			if gcx.jsonResponse != nil {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(statusCode)
-				if bytes, ok := gcx.jsonResponse.([]byte); ok {
-					if _, err := w.Write(bytes); err != nil {
-						return ErrInternal("failed to write response", err)
-					}
-				} else {
-					jsonData, err := json.Marshal(gcx.jsonResponse)
-					if err != nil {
-						return ErrInternal("Failed to marshal JSON response", err)
-					}
-					if _, err := w.Write(jsonData); err != nil {
-						return ErrInternal("failed to write response", err)
-					}
-				}
-			} else if gcx.rawResponse != nil {
-				switch body := gcx.rawResponse.(type) {
-				case []byte:
-					w.Header().Set("Content-Type", "application/octet-stream")
-					w.WriteHeader(statusCode)
-					if _, err := w.Write(body); err != nil {
-						return ErrInternal("failed to write response", err)
-					}
-				case string:
-					w.Header().Set("Content-Type", "text/plain; charset=UTF-8")
-					w.WriteHeader(statusCode)
-					if _, err := w.Write([]byte(body)); err != nil {
-						return ErrInternal("failed to write response", err)
-					}
-				default:
-					return ErrInternal("Unsupported response type", nil)
-				}
-			} else if gcx.rawHtml != "" {
-				w.Header().Set("Content-Type", "text/html; charset=UTF-8")
-				w.WriteHeader(statusCode)
-				if _, err := w.Write([]byte(gcx.rawHtml)); err != nil {
-					return ErrInternal("failed to write response", err)
-				}
-			}
-
-			return nil
+			return writeStoredResponse(GetContext(ctx), w, tw)
 		}
 	}
 }
@@ -372,12 +411,29 @@ func (ctx *Context) SSEWriter() *SSEWriter {
 	return ctx.sseWriter
 }
 
-// Query returns query parameter value.
+// Query returns query parameter value. The query string is parsed once per
+// request and reparsed only if the URL's raw query changes.
 func (ctx *Context) Query(key string) string {
-	if ctx.request == nil {
+	values := ctx.queryValues()
+	if values == nil {
 		return ""
 	}
-	return ctx.request.URL.Query().Get(key)
+	return values.Get(key)
+}
+
+// queryValues returns the parsed query of the current request, cached.
+func (ctx *Context) queryValues() url.Values {
+	if ctx.request == nil || ctx.request.URL == nil {
+		return nil
+	}
+	raw := ctx.request.URL.RawQuery
+	ctx.dataLock.Lock()
+	defer ctx.dataLock.Unlock()
+	if ctx.query == nil || ctx.queryRaw != raw {
+		ctx.query, _ = url.ParseQuery(raw) // like URL.Query, malformed pairs are dropped
+		ctx.queryRaw = raw
+	}
+	return ctx.query
 }
 
 // QueryDefault returns query parameter or default value if empty.
@@ -396,34 +452,31 @@ func (ctx *Context) Param(key string) string {
 	return ctx.request.PathValue(key)
 }
 
-// JSON writes JSON response with status code.
+// JSON sets a JSON response, written when the route returns. A later
+// JSON/String/Bytes/HTML call replaces it.
 func (ctx *Context) JSON(code int, data any) error {
 	jsonData, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
-	ctx.statusCode = code
-	ctx.setJSONResponse(jsonData)
+	ctx.setResponse(code, "application/json", jsonData)
 	return nil
 }
 
-// String writes plain text response with status code.
+// String sets a plain text response with status code; see JSON.
 func (ctx *Context) String(code int, s string) error {
-	ctx.statusCode = code
-	ctx.setRawResponse(s)
+	ctx.setResponse(code, "text/plain; charset=UTF-8", []byte(s))
 	return nil
 }
 
-// Bytes writes binary response with status code.
+// Bytes sets a binary response with status code; see JSON.
 func (ctx *Context) Bytes(code int, data []byte) error {
-	ctx.statusCode = code
-	ctx.setRawResponse(data)
+	ctx.setResponse(code, "application/octet-stream", data)
 	return nil
 }
 
-// HTML writes HTML response with status code.
+// HTML sets an HTML response with status code; see JSON.
 func (ctx *Context) HTML(code int, html string) error {
-	ctx.statusCode = code
-	ctx.setHTMLResponse(html)
+	ctx.setResponse(code, "text/html; charset=UTF-8", []byte(html))
 	return nil
 }

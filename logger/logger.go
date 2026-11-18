@@ -18,15 +18,18 @@ const (
 	LoggerJSONFormat = "json"
 )
 
+// Levels, from most to least verbose: TRACE < DEBUG < INFO < WARN < ERROR < FATAL.
 const (
+	LevelTrace   = slog.Level(-8)
 	LevelDebug   = slog.LevelDebug
-	LevelTrace   = slog.Level(-2)
 	LevelInfo    = slog.LevelInfo
 	LevelWarning = slog.LevelWarn
 	LevelError   = slog.LevelError
 	LevelFatal   = slog.Level(12)
 )
 
+// Logger is the framework logging interface. Fatal logs at FATAL level and
+// returns; it does not exit the process.
 type Logger interface {
 	Debug(ctx context.Context, msg string, args ...any)
 	Trace(ctx context.Context, msg string, args ...any)
@@ -110,29 +113,41 @@ func (c *Config) PanicFileName() string {
 	return filepath.Join(c.Dir, "panic.log")
 }
 
-func NewLogger(loggerConfig ...string) (Logger, error) {
-	opts := &slog.HandlerOptions{
-		Level:     LevelDebug,
+func newHandlerOptions() *slog.HandlerOptions {
+	return &slog.HandlerOptions{
+		Level:     LevelTrace,
 		AddSource: false,
 		ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
+			// Only rewrite slog's built-in top-level attrs; user attrs may reuse
+			// the same keys with arbitrary value types.
+			if len(groups) > 0 {
+				return attr
+			}
 			if attr.Key == slog.TimeKey {
 				if t, ok := attr.Value.Any().(time.Time); ok {
 					attr.Value = slog.StringValue(t.Format("2006-01-02 15:04:05.000"))
 				}
 			}
 			if attr.Key == slog.LevelKey {
-				level := attr.Value.Any().(slog.Level)
-				levelLabel, exists := LevelNames[level]
-				if !exists {
-					levelLabel = level.String()
+				if level, ok := attr.Value.Any().(slog.Level); ok {
+					levelLabel, exists := LevelNames[level]
+					if !exists {
+						levelLabel = level.String()
+					}
+					attr.Value = slog.StringValue(levelLabel)
 				}
-				attr.Value = slog.StringValue(levelLabel)
 			}
 			return attr
 		},
 	}
+}
 
-	if len(loggerConfig) == 0 {
+// NewLogger creates a logger from the given config file. With no argument or
+// an empty path it returns a console logger.
+func NewLogger(loggerConfig ...string) (Logger, error) {
+	opts := newHandlerOptions()
+
+	if len(loggerConfig) == 0 || loggerConfig[0] == "" {
 		return NewConsoleLogger(opts)
 	}
 

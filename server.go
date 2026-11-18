@@ -99,7 +99,12 @@ func (s *Server) ListenAndServe(ctx context.Context, handler http.Handler) error
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), s.config.ShutdownTimeout)
 		defer cancel()
-		return s.Shutdown(shutdownCtx)
+		if err := s.Shutdown(shutdownCtx); err != nil {
+			// Graceful shutdown timed out: drop the remaining connections.
+			_ = s.Close()
+			return err
+		}
+		return nil
 	}
 }
 
@@ -120,6 +125,24 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	s.started = false
 	s.mu.Unlock()
 	return nil
+}
+
+// Close immediately closes the listener and all connections, including
+// active ones. Use it after Shutdown fails to stop the server in time.
+func (s *Server) Close() error {
+	s.mu.Lock()
+	httpServer := s.httpServer
+	s.mu.Unlock()
+
+	if httpServer == nil {
+		return nil
+	}
+	err := httpServer.Close()
+
+	s.mu.Lock()
+	s.started = false
+	s.mu.Unlock()
+	return err
 }
 
 // Addr returns the listening address.
@@ -218,7 +241,12 @@ func (s *Server) listen() (net.Listener, error) {
 		_ = ln.Close()
 		return nil, fmt.Errorf("load tls cert error: %w", err)
 	}
-	return tls.NewListener(ln, &tls.Config{Certificates: []tls.Certificate{cert}}), nil
+	// http.Server.Serve only negotiates HTTP/2 when the TLS config offers "h2".
+	return tls.NewListener(ln, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+		NextProtos:   []string{"h2", "http/1.1"},
+	}), nil
 }
 
 func (s *Server) serveLocked(ln net.Listener) <-chan error {

@@ -2,10 +2,10 @@ package golitekit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/hansir-hsj/GoLiteKit/env"
@@ -16,9 +16,71 @@ import (
 type App struct {
 	services *Services
 	router   *Router
+	env      *env.Env // nil for NewApp
+
+	deferredMounts []func()
+	mountOnce      sync.Once
+
+	closeMu   sync.Mutex
+	closers   []func(context.Context) error
+	closeOnce sync.Once
+	closeErr  error
+
+	pprofAddr    string // from the pprofAddr config; "" = not used
+	pprofMu      sync.Mutex
+	pprofStarted bool
 
 	serverMu sync.Mutex
 	server   *Server
+}
+
+// startPprof starts the separate pprof listener configured with pprofAddr,
+// once. It is stopped by Close.
+func (a *App) startPprof() error {
+	a.pprofMu.Lock()
+	defer a.pprofMu.Unlock()
+	if a.pprofAddr == "" || a.pprofStarted {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	if _, err := ServePprof(ctx, a.pprofAddr, PprofOptions{LoopbackOnly: true}); err != nil {
+		cancel()
+		return err
+	}
+	a.pprofStarted = true
+	a.OnClose(func(context.Context) error { cancel(); return nil })
+	return nil
+}
+
+// OnClose registers fn to run on Close, in reverse registration order.
+func (a *App) OnClose(fn func(ctx context.Context) error) {
+	if fn == nil {
+		return
+	}
+	a.closeMu.Lock()
+	a.closers = append(a.closers, fn)
+	a.closeMu.Unlock()
+}
+
+// Close runs the OnClose functions in reverse order and closes the loggers
+// created by NewAppFromConfig. Clients passed in by the caller are not closed.
+// Only the first call has effect; errors are joined.
+func (a *App) Close(ctx context.Context) error {
+	a.closeOnce.Do(func() {
+		a.closeMu.Lock()
+		closers := a.closers
+		a.closers = nil
+		a.closeMu.Unlock()
+
+		var errs []error
+		for i := len(closers) - 1; i >= 0; i-- {
+			if err := closers[i](ctx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+		a.closeErr = errors.Join(errs...)
+	})
+	return a.closeErr
 }
 
 // NewApp creates an App with dependency injection.
@@ -37,19 +99,23 @@ func NewApp(opts ...ServiceOption) *App {
 	}
 }
 
-// NewAppFromConfig creates an App from an env config file.
+// NewAppFromConfig creates an App from a config file. The config is kept on
+// the app (see App.Env) and also becomes the env package default.
 func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
-	if err := env.Init(confPath); err != nil {
+	e, err := env.Load(confPath)
+	if err != nil {
 		return nil, err
 	}
+	env.SetDefault(e)
+
 	loggerOptions := LoggerOptions{
-		LogRequestBody:  env.LogRequestBody(),
-		LogResponseBody: env.LogResponseBody(),
+		LogRequestBody:  e.LogRequestBody(),
+		LogResponseBody: e.LogResponseBody(),
 		MaxBodyBytes:    DefaultLogBodyLimit,
 	}
 	timeoutOptions := TimeoutOptions{
-		Duration:   env.WriteTimeout(),
-		SSETimeout: env.SSETimeout(),
+		Duration:   e.WriteTimeout(),
+		SSETimeout: e.SSETimeout(),
 	}
 
 	services := &Services{}
@@ -57,26 +123,27 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 		opt(services)
 	}
 
+	// Loggers created here are closed by the app; passed-in ones are not.
+	var ownedLoggers []func() error
 	if services.logger == nil {
-		loggerCfg := env.LoggerConfigFile()
-		var l logger.Logger
-		var err error
-		if loggerCfg == "" {
-			l, err = logger.NewLogger() // no config; fall back to console logger
-		} else {
-			l, err = logger.NewLogger(loggerCfg)
-		}
+		// An empty path falls back to the console logger.
+		l, err := logger.NewLogger(e.LoggerConfigFile())
 		if err != nil {
 			return nil, err
 		}
 		services.logger = l
+		ownedLoggers = append(ownedLoggers, l.Close)
 	}
 	if services.panicLogger == nil {
-		pl, err := logger.NewPanicLogger(env.LoggerConfigFile())
+		pl, err := logger.NewPanicLogger(e.LoggerConfigFile())
 		if err != nil {
+			for _, closeLogger := range ownedLoggers {
+				_ = closeLogger()
+			}
 			return nil, err
 		}
 		services.panicLogger = pl
+		ownedLoggers = append(ownedLoggers, pl.Close)
 	}
 
 	router := NewRouter(services)
@@ -85,23 +152,46 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 		timeout: timeoutOptions,
 	})...)
 
-	if env.EnablePprof() {
-		router.MountPprof(PprofOptions{LoopbackOnly: true})
-	}
-
-	if staticDir := env.StaticDir(); staticDir != "" {
-		if !filepath.IsAbs(staticDir) {
-			staticDir = filepath.Join(env.RootDir(), staticDir)
-		}
-		if _, err := os.Stat(staticDir); err == nil {
-			router.Static("/static", staticDir)
-		}
-	}
-
-	return &App{
+	app := &App{
 		services: services,
 		router:   router,
-	}, nil
+		env:      e,
+	}
+	// Registered first so they are closed last: other close functions may log.
+	for _, closeLogger := range ownedLoggers {
+		closeLogger := closeLogger
+		app.OnClose(func(context.Context) error { return closeLogger() })
+	}
+
+	// Mounted on first serve, so Use still works after NewAppFromConfig.
+	if e.EnablePprof() {
+		if addr := e.PprofAddr(); addr != "" {
+			app.pprofAddr = addr // separate listener, started with the server
+		} else {
+			app.deferredMounts = append(app.deferredMounts, func() {
+				router.MountPprof(PprofOptions{LoopbackOnly: true})
+			})
+		}
+	}
+	// StaticDir is already absolute (resolved against the working directory).
+	if staticDir := e.StaticDir(); staticDir != "" {
+		if _, err := os.Stat(staticDir); err == nil {
+			app.deferredMounts = append(app.deferredMounts, func() {
+				router.Static("/static", staticDir)
+			})
+		}
+	}
+
+	return app, nil
+}
+
+// mountDeferred registers config-driven routes once, before serving.
+func (a *App) mountDeferred() {
+	a.mountOnce.Do(func() {
+		for _, mount := range a.deferredMounts {
+			mount()
+		}
+	})
 }
 
 type defaultMiddlewareOptions struct {
@@ -109,30 +199,45 @@ type defaultMiddlewareOptions struct {
 	timeout TimeoutOptions
 }
 
+// defaultMiddlewares returns the default stack, outermost first. Logger and
+// LogID sit outside the error handler so they also cover error responses.
 func defaultMiddlewares(services *Services, opts defaultMiddlewareOptions) []Middleware {
 	middlewares := []Middleware{}
 	if observabilityMiddleware := services.ObservabilityMiddleware(); observabilityMiddleware != nil {
 		middlewares = append(middlewares, observabilityMiddleware)
 	}
 	middlewares = append(middlewares,
-		ErrorHandlerMiddleware(
-			WithErrorCallback(func(r *http.Request, err *AppError) {
-				if services.logger != nil {
-					services.logger.Warning(r.Context(), "request error: %d %s", err.Code, err.Message)
-				}
-			}),
-			WithPanicCallback(func(r *http.Request, recovered any) {
-				if services.panicLogger != nil {
-					services.panicLogger.Report(r.Context(), recovered)
-				}
-			}),
-		),
 		LoggerAsMiddleware(services.logger, services.panicLogger, opts.logger),
-		LogIDMiddleware(),
+		LogIDMiddleware(services.logIDOptions),
+		ErrorHandlerMiddleware(),
 		TimeoutMiddleware(opts.timeout),
 		ContextAsMiddleware(),
 	)
 	return middlewares
+}
+
+// serverConfig picks the explicit config, else the loaded config file, else
+// DefaultServerConfig.
+func (a *App) serverConfig(configs []ServerConfig) ServerConfig {
+	if len(configs) > 0 || a.env == nil {
+		return appServerConfig(configs)
+	}
+	e := a.env
+	config := ServerConfig{
+		Addr:              e.Addr(),
+		Network:           e.Network(),
+		ReadTimeout:       e.ReadTimeout(),
+		WriteTimeout:      e.WriteTimeout(),
+		IdleTimeout:       e.IdleTimeout(),
+		ReadHeaderTimeout: e.ReadHeaderTimeout(),
+		MaxHeaderBytes:    e.MaxHeaderBytes(),
+		ShutdownTimeout:   e.ShutdownTimeout(),
+	}
+	if e.TLS() {
+		config.TLSCertFile = e.TLSCertFile()
+		config.TLSKeyFile = e.TLSKeyFile()
+	}
+	return config
 }
 
 func appServerConfig(configs []ServerConfig) ServerConfig {
@@ -151,6 +256,10 @@ func (a *App) currentServer() *Server {
 // Services returns the app dependency container.
 func (a *App) Services() *Services { return a.services }
 
+// Env returns the config loaded by NewAppFromConfig. It is nil for apps built
+// with NewApp; its accessors are nil-safe and then return the defaults.
+func (a *App) Env() *env.Env { return a.env }
+
 // Route registration shortcuts delegate to the app router.
 func (a *App) GET(path string, c any)           { a.router.GET(path, c) }
 func (a *App) POST(path string, c any)          { a.router.POST(path, c) }
@@ -163,18 +272,29 @@ func (a *App) Any(path string, c any)           { a.router.Any(path, c) }
 func (a *App) Use(middlewares ...Middleware)    { a.router.Use(middlewares...) }
 func (a *App) Group(prefix string) *RouterGroup { return a.router.Group(prefix) }
 func (a *App) Static(urlPath, fsPath string)    { a.router.Static(urlPath, fsPath) }
-func (a *App) Handler() http.Handler            { return a.router.Handler() }
+
+// UseOuter registers middlewares that run before the default middleware stack;
+// see Router.UseOuter.
+func (a *App) UseOuter(middlewares ...Middleware) { a.router.UseOuter(middlewares...) }
+
+// Handler returns the app's http.Handler. The first call also mounts routes
+// enabled by the config file (pprof, static), after which Use panics.
+func (a *App) Handler() http.Handler {
+	a.mountDeferred()
+	return a.router.Handler()
+}
 
 // MountPprof registers the standard net/http/pprof endpoints on the app router.
 // It only mounts handlers and does not start or block the server; pass PprofOptions
 // to restrict access or change the mount prefix.
 func (a *App) MountPprof(opts ...PprofOptions) { a.router.MountPprof(opts...) }
 
-// Start starts the app's HTTP server in the background using the provided config,
-// or DefaultServerConfig when no config is supplied. It returns after the listener
-// is started and does not block while serving requests. If the app already has a
-// running server, Start returns an already-started error.
+// Start starts the server in the background. Without a config, an app from
+// NewAppFromConfig uses its config file, others DefaultServerConfig.
 func (a *App) Start(configs ...ServerConfig) error {
+	if err := a.startPprof(); err != nil {
+		return err
+	}
 	a.serverMu.Lock()
 	defer a.serverMu.Unlock()
 
@@ -182,8 +302,8 @@ func (a *App) Start(configs ...ServerConfig) error {
 		return fmt.Errorf("app server already started")
 	}
 
-	srv := NewServer(appServerConfig(configs))
-	if err := srv.Start(a.router.Handler()); err != nil {
+	srv := NewServer(a.serverConfig(configs))
+	if err := srv.Start(a.Handler()); err != nil {
 		return err
 	}
 	a.server = srv
@@ -191,22 +311,21 @@ func (a *App) Start(configs ...ServerConfig) error {
 	return nil
 }
 
-// ListenAndServe starts the app's HTTP server and blocks until ctx is canceled.
-// It uses the provided config, or DefaultServerConfig when no config is supplied.
-// When ctx is canceled, ListenAndServe performs a graceful shutdown using the
-// configured shutdown timeout, clears the current server, and returns nil for
-// normal context-cancel shutdown. If the app already has a running server,
-// ListenAndServe returns an already-started error.
+// ListenAndServe serves until ctx is canceled, then shuts down gracefully and
+// closes the app (see Close). The config is chosen as in Start.
 func (a *App) ListenAndServe(ctx context.Context, configs ...ServerConfig) error {
+	if err := a.startPprof(); err != nil {
+		return err
+	}
 	a.serverMu.Lock()
 	if a.server != nil {
 		a.serverMu.Unlock()
 		return fmt.Errorf("app server already started")
 	}
 
-	config := appServerConfig(configs)
+	config := a.serverConfig(configs)
 	srv := NewServer(config)
-	if err := srv.Start(a.router.Handler()); err != nil {
+	if err := srv.Start(a.Handler()); err != nil {
 		a.serverMu.Unlock()
 		return err
 	}
@@ -215,31 +334,29 @@ func (a *App) ListenAndServe(ctx context.Context, configs ...ServerConfig) error
 
 	select {
 	case serveErr := <-srv.Done():
-		a.serverMu.Lock()
-		if a.server == srv {
-			a.server = nil
-		}
-		a.serverMu.Unlock()
-		return serveErr
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), srv.config.ShutdownTimeout)
+		a.clearServer(srv)
+		closeCtx, cancel := context.WithTimeout(context.Background(), srv.config.ShutdownTimeout)
 		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			return err
-		}
+		return errors.Join(serveErr, a.Close(closeCtx))
+	case <-ctx.Done():
 	}
 
-	a.serverMu.Lock()
-	if a.server == srv {
-		a.server = nil
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), srv.config.ShutdownTimeout)
+	defer cancel()
+	shutdownErr := srv.Shutdown(shutdownCtx)
+	if shutdownErr != nil {
+		// Shutdown timed out: drop the remaining connections.
+		_ = srv.Close()
 	}
-	a.serverMu.Unlock()
-	return nil
+	a.clearServer(srv)
+	// shutdownCtx may have expired.
+	closeCtx, cancelClose := context.WithTimeout(context.Background(), srv.config.ShutdownTimeout)
+	defer cancelClose()
+	return errors.Join(shutdownErr, a.Close(closeCtx))
 }
 
-// Shutdown gracefully stops the app's current HTTP server using ctx and clears it
-// after a successful shutdown. Shutdown blocks until the server stops or ctx is
-// done. Calling Shutdown when no server is running is a no-op and returns nil.
+// Shutdown gracefully stops the current server. It does not close the app,
+// so the app can be started again.
 func (a *App) Shutdown(ctx context.Context) error {
 	a.serverMu.Lock()
 	srv := a.server
@@ -262,7 +379,10 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 func (a *App) clearServerWhenDone(srv *Server) {
 	<-srv.Done()
+	a.clearServer(srv)
+}
 
+func (a *App) clearServer(srv *Server) {
 	a.serverMu.Lock()
 	if a.server == srv {
 		a.server = nil

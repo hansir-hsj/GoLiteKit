@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +57,148 @@ func TestPlanNewProject_RejectsDot(t *testing.T) {
 	}
 }
 
+func TestAskForConfirm(t *testing.T) {
+	cases := map[string]bool{
+		"y\n":         true,
+		"YES\n":       true,
+		"n\n":         false,
+		"\n":          false, // empty answer means no instead of exiting
+		"":            false, // EOF
+		"maybe\ny\n":  true,
+		"maybe\n":     false,
+		"  yes  \n":   true,
+		"no thanks\n": false,
+	}
+	for in, want := range cases {
+		if got := askForConfirm(bufio.NewScanner(strings.NewReader(in))); got != want {
+			t.Errorf("askForConfirm(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestRenderTemplateFiles_PinsFrameworkVersion(t *testing.T) {
+	files, err := renderTemplateFiles("app", "example.com/app", "v1.3.0")
+	if err != nil {
+		t.Fatalf("renderTemplateFiles: %v", err)
+	}
+	if got := string(files["go.mod"]); !strings.Contains(got, "require github.com/hansir-hsj/GoLiteKit v1.3.0") {
+		t.Fatalf("go.mod does not pin framework version:\n%s", got)
+	}
+
+	files, err = renderTemplateFiles("app", "example.com/app", "")
+	if err != nil {
+		t.Fatalf("renderTemplateFiles: %v", err)
+	}
+	if got := string(files["go.mod"]); strings.Contains(got, "require") {
+		t.Fatalf("go.mod should not require an unknown version:\n%s", got)
+	}
+}
+
+func TestRenderAddTemplate_DoesNotOverwrite(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "user_controller.go")
+	if err := os.WriteFile(outPath, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := renderAddTemplate("tpl_add/controller.go.tpl", outPath, map[string]any{"Name": "User"}); err == nil {
+		t.Fatal("expected error for existing file")
+	}
+	if got, _ := os.ReadFile(outPath); string(got) != "keep" {
+		t.Fatalf("existing file was modified: %q", got)
+	}
+}
+
+func TestRenderAddTemplate_NoFileOnTemplateError(t *testing.T) {
+	outPath := filepath.Join(t.TempDir(), "x.go")
+	if err := renderAddTemplate("tpl_add/missing.go.tpl", outPath, nil); err == nil {
+		t.Fatal("expected error for missing template")
+	}
+	if _, err := os.Stat(outPath); !os.IsNotExist(err) {
+		t.Fatalf("output file should not exist, stat err = %v", err)
+	}
+}
+
+func TestPlanNewProject_RejectsEscapingCwd(t *testing.T) {
+	for _, target := range []string{"../..", "../x", "a/../../b", "a/.."} {
+		if _, _, _, err := PlanNewProject(target, ""); err == nil {
+			t.Errorf("PlanNewProject(%q) = nil error, want rejection", target)
+		}
+	}
+	if _, _, _, err := PlanNewProject("a/../b", ""); err != nil {
+		t.Errorf("PlanNewProject(a/../b) = %v, want nil", err)
+	}
+	if _, _, _, err := PlanNewProject(filepath.Join(t.TempDir(), "x"), ""); err == nil {
+		t.Error("absolute app path accepted")
+	}
+}
+
+// A symlink in the current directory must not let the project land elsewhere.
+func TestPlanNewProject_RejectsSymlinkEscape(t *testing.T) {
+	cwd := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cwd, "link")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+	prev, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(cwd); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(prev)
+
+	for _, target := range []string{"link", "link/app"} {
+		if _, _, _, err := PlanNewProject(target, ""); err == nil {
+			t.Errorf("PlanNewProject(%q) = nil error, want rejection", target)
+		}
+	}
+}
+
+func TestWriteTemplateFiles_RefusesSymlinkAndRollsBack(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(dir, "b.txt")); err != nil {
+		t.Skipf("symlink: %v", err)
+	}
+
+	var created []string
+	err := writeTemplateFiles(dir, map[string][]byte{"a/x.txt": []byte("x"), "b.txt": []byte("y")}, &created)
+	if err == nil {
+		t.Fatal("wrote through a symlink")
+	}
+	if b, _ := os.ReadFile(victim); string(b) != "keep" {
+		t.Fatalf("symlink target changed: %q", b)
+	}
+	removeCreated(created)
+	if _, err := os.Stat(filepath.Join(dir, "a")); !os.IsNotExist(err) {
+		t.Fatalf("created directory not removed: %v", err)
+	}
+}
+
+func TestAddUnknownComponentFails(t *testing.T) {
+	if err := addCmd.RunE(addCmd, []string{"contrller"}); err == nil {
+		t.Fatal("unknown component accepted")
+	}
+}
+
+func TestValidateComponentName(t *testing.T) {
+	valid := map[string]string{"user": "User", "user_profile": "UserProfile", "request-id": "RequestId"}
+	for in, want := range valid {
+		got, err := validateComponentName(in)
+		if err != nil || got != want {
+			t.Errorf("validateComponentName(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "../../x", "a/b", "a.b", "1user", "_x", "x y"} {
+		if _, err := validateComponentName(in); err == nil {
+			t.Errorf("validateComponentName(%q) = nil error, want rejection", in)
+		}
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 
@@ -107,7 +250,9 @@ func TestRenderAddControllerTemplate_Compiles(t *testing.T) {
 	}
 
 	outPath := filepath.Join(outDir, "user_controller.go")
-	renderAddTemplate("tpl_add/controller.go.tpl", outPath, map[string]any{"Name": "User"})
+	if err := renderAddTemplate("tpl_add/controller.go.tpl", outPath, map[string]any{"Name": "User"}); err != nil {
+		t.Fatalf("renderAddTemplate: %v", err)
+	}
 
 	content, err := os.ReadFile(outPath)
 	if err != nil {
@@ -133,7 +278,9 @@ func TestRenderAddMiddlewareTemplate_CompilesAsGoLiteKitMiddleware(t *testing.T)
 	}
 
 	outPath := filepath.Join(outDir, "request_id_middleware.go")
-	renderAddTemplate("tpl_add/middleware.go.tpl", outPath, map[string]any{"Name": "RequestId"})
+	if err := renderAddTemplate("tpl_add/middleware.go.tpl", outPath, map[string]any{"Name": "RequestId"}); err != nil {
+		t.Fatalf("renderAddTemplate: %v", err)
+	}
 
 	usage := `package generated
 

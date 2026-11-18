@@ -28,9 +28,12 @@ func gunzip(t *testing.T, data []byte) string {
 	return string(out)
 }
 
+// bigBody is above DefaultCompressionMinSize, so it gets compressed.
+var bigBody = strings.Repeat("hello compressed world ", 100)
+
 func TestCompressionMiddleware_CompressesWhenAccepted(t *testing.T) {
 	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		w.Write([]byte("hello compressed world"))
+		w.Write([]byte(bigBody))
 		return nil
 	})
 
@@ -46,8 +49,8 @@ func TestCompressionMiddleware_CompressesWhenAccepted(t *testing.T) {
 	}
 
 	body := gunzip(t, rec.Body.Bytes())
-	if body != "hello compressed world" {
-		t.Errorf("decompressed body = %q, want %q", body, "hello compressed world")
+	if body != bigBody {
+		t.Errorf("decompressed body length = %d, want %d", len(body), len(bigBody))
 	}
 }
 
@@ -73,7 +76,8 @@ func TestCompressionMiddleware_SkipsWithoutAcceptEncoding(t *testing.T) {
 
 func TestCompressionMiddleware_VaryHeader(t *testing.T) {
 	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		w.Write([]byte("data"))
+		w.Header().Set("Vary", "Origin")
+		w.Write([]byte(bigBody))
 		return nil
 	})
 
@@ -84,14 +88,16 @@ func TestCompressionMiddleware_VaryHeader(t *testing.T) {
 
 	mw(inner).ServeHTTP(rec, req)
 
-	if rec.Header().Get("Vary") != "Accept-Encoding" {
-		t.Errorf("Vary = %q, want Accept-Encoding", rec.Header().Get("Vary"))
+	// The existing Vary value is kept and Accept-Encoding is added.
+	if got := rec.Header().Values("Vary"); len(got) != 2 || got[0] != "Origin" || got[1] != "Accept-Encoding" {
+		t.Errorf("Vary = %q, want [Origin Accept-Encoding]", got)
 	}
 }
 
 func TestCompressionMiddleware_NoContentLength(t *testing.T) {
 	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		w.Write([]byte("data"))
+		w.Header().Set("Content-Length", "2300")
+		w.Write([]byte(bigBody))
 		return nil
 	})
 
@@ -102,8 +108,122 @@ func TestCompressionMiddleware_NoContentLength(t *testing.T) {
 
 	mw(inner).ServeHTTP(rec, req)
 
-	if rec.Header().Get("Content-Encoding") != "gzip" {
-		t.Errorf("Content-Encoding = %q, want gzip", rec.Header().Get("Content-Encoding"))
+	if rec.Header().Get("Content-Encoding") != "gzip" || rec.Header().Get("Content-Length") != "" {
+		t.Errorf("Content-Encoding = %q Content-Length = %q", rec.Header().Get("Content-Encoding"), rec.Header().Get("Content-Length"))
+	}
+}
+
+func TestCompressionMiddleware_SkipsIneligibleResponses(t *testing.T) {
+	cases := []struct {
+		name           string
+		method         string
+		acceptEncoding string
+		setup          func(w http.ResponseWriter)
+		body           string
+	}{
+		{"small body", http.MethodGet, "gzip", nil, "tiny"},
+		{"q=0", http.MethodGet, "gzip;q=0, deflate", nil, bigBody},
+		{"star with gzip excluded", http.MethodGet, "*, gzip;q=0", nil, bigBody},
+		{"HEAD", http.MethodHead, "gzip", nil, ""},
+		{"image", http.MethodGet, "gzip", func(w http.ResponseWriter) { w.Header().Set("Content-Type", "image/png") }, bigBody},
+		{"already encoded", http.MethodGet, "gzip", func(w http.ResponseWriter) { w.Header().Set("Content-Encoding", "br") }, bigBody},
+		{"partial content", http.MethodGet, "gzip", func(w http.ResponseWriter) {
+			w.Header().Set("Content-Range", "bytes 0-4095/8192")
+			w.WriteHeader(http.StatusPartialContent)
+		}, bigBody},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+				if tc.setup != nil {
+					tc.setup(w)
+				}
+				w.Write([]byte(tc.body))
+				return nil
+			})
+			req := httptest.NewRequest(tc.method, "/", nil)
+			req.Header.Set("Accept-Encoding", tc.acceptEncoding)
+			rec := httptest.NewRecorder()
+			CompressionMiddleware()(inner).ServeHTTP(rec, req)
+
+			if rec.Header().Get("Content-Encoding") == "gzip" {
+				t.Fatal("response should not be gzip-compressed")
+			}
+			if rec.Body.String() != tc.body {
+				t.Fatalf("body changed: %.40q", rec.Body.String())
+			}
+		})
+	}
+}
+
+func BenchmarkCompressionMiddleware(b *testing.B) {
+	h := CompressionMiddleware()(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.Write([]byte(bigBody))
+		return nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), req)
+	}
+}
+
+func TestAcceptsGzip(t *testing.T) {
+	for header, want := range map[string]bool{
+		"gzip":               true,
+		"gzip, deflate, br":  true,
+		"GZIP;q=0.5":         true,
+		"gzip;q=0":           false,
+		"gzip; q=0.0":        false,
+		"deflate":            false,
+		"*":                  true,
+		"*;q=0":              false,
+		"br, *;q=0.1":        true,
+		"identity, gzip;q=0": false,
+		"gzip;foo=1;q=0":     false,
+		"gzip;q=abc":         false,
+	} {
+		if got := acceptsGzip([]string{header}); got != want {
+			t.Errorf("acceptsGzip(%q) = %v, want %v", header, got, want)
+		}
+	}
+}
+
+func TestCompressionMiddleware_WeakensStrongETag(t *testing.T) {
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("ETag", `"v1"`)
+		w.Write([]byte(bigBody))
+		return nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+	CompressionMiddleware()(inner).ServeHTTP(rec, req)
+
+	if rec.Header().Get("Content-Encoding") != "gzip" || rec.Header().Get("ETag") != `W/"v1"` {
+		t.Fatalf("Content-Encoding = %q, ETag = %q", rec.Header().Get("Content-Encoding"), rec.Header().Get("ETag"))
+	}
+}
+
+func TestCompressionMiddleware_SmallFlushedStreamIsNotCompressed(t *testing.T) {
+	fr := &flushableRecorder{ResponseRecorder: httptest.NewRecorder()}
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: 1\n\n"))
+		w.(http.Flusher).Flush()
+		w.Write([]byte("data: 2\n\n"))
+		return nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	CompressionMiddleware()(inner).ServeHTTP(fr, req)
+
+	if fr.flushCount == 0 || fr.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("flushes = %d Content-Encoding = %q", fr.flushCount, fr.Header().Get("Content-Encoding"))
+	}
+	if fr.Body.String() != "data: 1\n\ndata: 2\n\n" {
+		t.Fatalf("body = %q", fr.Body.String())
 	}
 }
 
@@ -125,6 +245,50 @@ func TestCompressionMiddleware_NoContent204(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Errorf("expected empty body for 204 No Content, got %q", rec.Body.String())
+	}
+}
+
+func TestCompressionMiddleware_ErrorWithoutWriteIsNotCompressed(t *testing.T) {
+	h := ErrorHandlerMiddleware()(CompressionMiddleware()(
+		func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			return ErrBadRequest("bad", nil)
+		}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req = req.WithContext(withContext(req.Context()))
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("Content-Encoding = %q, want none on plain error response", rec.Header().Get("Content-Encoding"))
+	}
+	if !strings.Contains(rec.Body.String(), `"msg":"bad"`) {
+		t.Fatalf("body = %q, want JSON error", rec.Body.String())
+	}
+}
+
+func TestCompressionMiddleware_ExplicitStatusThenWrite(t *testing.T) {
+	inner := Handler(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(bigBody))
+		return nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	CompressionMiddleware()(inner).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated || rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("status = %d, Content-Encoding = %q", rec.Code, rec.Header().Get("Content-Encoding"))
+	}
+	if body := gunzip(t, rec.Body.Bytes()); body != bigBody {
+		t.Fatalf("decompressed body length = %d, want %d", len(body), len(bigBody))
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -243,6 +244,60 @@ func TestErrorHandlerMiddleware_ErrorCallback(t *testing.T) {
 		}
 		if callbackReq == nil {
 			t.Error("expected request to be passed to callback")
+		}
+	})
+}
+
+func TestErrorHandlerMiddleware_DoesNotRewriteSentResponse(t *testing.T) {
+	big := strings.Repeat("a", 2<<20)
+
+	t.Run("error after body write", func(t *testing.T) {
+		var callbackErr *AppError
+		mw := ErrorHandlerMiddleware(WithErrorCallback(func(r *http.Request, err *AppError) {
+			callbackErr = err
+		}))
+		wrapped := mw(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			w.Write([]byte(big))
+			return ErrBadRequest("late error", nil)
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req = req.WithContext(withContext(req.Context()))
+		rec := httptest.NewRecorder()
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want 200 (already sent)", rec.Code)
+		}
+		if rec.Body.String() != big {
+			t.Errorf("body was modified after commit, len = %d", rec.Body.Len())
+		}
+		if callbackErr == nil {
+			t.Error("error callback should still be called for logging")
+		}
+	})
+
+	t.Run("panic after flush", func(t *testing.T) {
+		var recovered any
+		mw := ErrorHandlerMiddleware(WithPanicCallback(func(r *http.Request, p any) {
+			recovered = p
+		}))
+		wrapped := mw(func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+			w.Write([]byte("data: 1\n\n"))
+			w.(http.Flusher).Flush()
+			panic("boom")
+		})
+
+		req := httptest.NewRequest("GET", "/test", nil)
+		req = req.WithContext(withContext(req.Context()))
+		rec := httptest.NewRecorder()
+		wrapped.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK || rec.Body.String() != "data: 1\n\n" {
+			t.Errorf("got status %d body %q, want untouched stream", rec.Code, rec.Body.String())
+		}
+		if recovered != "boom" {
+			t.Errorf("panic callback got %v", recovered)
 		}
 	})
 }

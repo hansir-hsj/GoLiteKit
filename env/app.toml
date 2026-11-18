@@ -14,10 +14,6 @@ shutdownTimeout = 5000
 [HttpServer.SSE]
 timeout = 300000
 
-[HttpServer.RateLimit]
-rateLimit = 100
-rateBurst = 150
-
 [HttpServer.Logger]
 configFile = "logger.toml"
 logRequestBody = true    # 开启请求体打印（可选）

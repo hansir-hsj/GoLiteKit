@@ -59,6 +59,49 @@ logResponseBody = ` + value + `
 	return path
 }
 
+func TestNewAppFromConfigKeepsOwnEnv(t *testing.T) {
+	first, err := NewAppFromConfig(writeAppConfig(t, t.TempDir(), false, 1000))
+	if err != nil {
+		t.Fatalf("first app: %v", err)
+	}
+	second, err := NewAppFromConfig(writeAppConfig(t, t.TempDir(), false, 2000))
+	if err != nil {
+		t.Fatalf("second app: %v", err)
+	}
+
+	if got := first.Env().WriteTimeout(); got != time.Second {
+		t.Fatalf("first app WriteTimeout = %v, want 1s", got)
+	}
+	if got := second.Env().WriteTimeout(); got != 2*time.Second {
+		t.Fatalf("second app WriteTimeout = %v, want 2s", got)
+	}
+	if env.Default() != second.Env() {
+		t.Fatal("the process default should be the most recently loaded env")
+	}
+	if NewApp().Env() != nil {
+		t.Fatal("NewApp should have no env")
+	}
+}
+
+// Without an explicit ServerConfig, an app from a config file uses its server
+// settings.
+func TestNewAppFromConfigUsesConfiguredServerSettings(t *testing.T) {
+	app, err := NewAppFromConfig(writeAppConfig(t, t.TempDir(), false, 2000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := app.serverConfig(nil)
+	if got.Addr != ":0" || got.WriteTimeout != 2*time.Second {
+		t.Fatalf("server config = %+v, want addr :0 and 2s write timeout from the file", got)
+	}
+	if explicit := app.serverConfig([]ServerConfig{{Addr: "127.0.0.1:1"}}); explicit.Addr != "127.0.0.1:1" {
+		t.Fatalf("explicit config ignored: %+v", explicit)
+	}
+	if NewApp().serverConfig(nil) != DefaultServerConfig() {
+		t.Fatal("NewApp should use DefaultServerConfig")
+	}
+}
+
 func TestNewAppFromConfigFreezesLoggerOptions(t *testing.T) {
 	firstDir := t.TempDir()
 	secondDir := t.TempDir()

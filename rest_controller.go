@@ -3,12 +3,17 @@ package golitekit
 import (
 	"context"
 	"net/http"
+
+	"github.com/hansir-hsj/GoLiteKit/logger"
 )
 
 const (
+	// OK is the "status" of a successful response. Any other value is a failure.
 	OK = 0
 )
 
+// Response is the JSON envelope. Status is the business code: 0 (OK) is
+// success; framework errors use the HTTP code unless set with WithStatus.
 type Response struct {
 	Status int    `json:"status"`
 	Msg    string `json:"msg"`
@@ -48,7 +53,13 @@ func (c *RestControllerOf[T]) ServeMsgData(ctx context.Context, msg string, data
 	return c.JSON(http.StatusOK, res)
 }
 
+// ServeError replies with HTTP 200 and a failure envelope. status 0 would mean
+// success, so it becomes -1. Return an *AppError for a real HTTP error.
 func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg string) error {
+	if status == OK {
+		status = -1
+	}
+	logger.AddInfo(ctx, "biz_status", status)
 	logID := EnsureLogID(ctx)
 	res := Response{
 		Status: status,
@@ -58,6 +69,7 @@ func (c *RestControllerOf[T]) ServeError(ctx context.Context, status int, msg st
 	return c.JSON(http.StatusOK, res)
 }
 
+// ServeErrorMsg is ServeError with status -1.
 func (c *RestControllerOf[T]) ServeErrorMsg(ctx context.Context, msg string) error {
 	return c.ServeError(ctx, -1, msg)
 }

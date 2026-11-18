@@ -1,14 +1,16 @@
-# Data Source Name
+# Data Source Name. When set, it is used as-is and the connection fields
+# below (username ... parseTime, and [db.Timeout]) are ignored.
 [db]
-dsn = "xx"
+dsn = ""
 username = "xx"
 password = "xx"
 protocol = "tcp"
-host = ""
+host = "127.0.0.1"
 port = 3306
 database = "xx"
 parseTime = true
 
+# milliseconds
 [db.Timeout]
 timeout = 1500
 readTimeout = 1500
@@ -17,5 +19,5 @@ writeTimeout = 1500
 [db.Conn]
 maxOpenConns = 10
 maxIdleConns = 5
-# 单位秒
-connMaxLifetime = 600
+# milliseconds
+connMaxLifeTime = 600000

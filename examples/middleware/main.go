@@ -18,16 +18,8 @@ import (
 )
 
 // ---- middleware ------------------------------------------------------------
-
-// RequestIDMiddleware adds a request ID header to every response.
-func RequestIDMiddleware(next glk.Handler) glk.Handler {
-	return func(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-		if logID := glk.EnsureLogID(ctx); logID != "" {
-			w.Header().Set("X-Request-ID", logID)
-		}
-		return next(ctx, w, r)
-	}
-}
+//
+// The default stack already sets the X-Request-ID response header.
 
 // AuthMiddleware rejects requests missing the X-Token header.
 func AuthMiddleware(next glk.Handler) glk.Handler {
@@ -79,9 +71,6 @@ func (c *AdminController) Serve(ctx context.Context) error {
 
 func main() {
 	app := glk.NewApp()
-
-	// Global middleware applied to every route.
-	app.Use(RequestIDMiddleware)
 
 	// Public routes — no auth.
 	public := app.Group("/public")

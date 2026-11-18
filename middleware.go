@@ -14,11 +14,8 @@ type Handler func(ctx context.Context, w http.ResponseWriter, r *http.Request) e
 // text response so Handler can be used directly with http.ServeMux in tests.
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := h(r.Context(), w, r); err != nil {
-		if appErr, ok := err.(*AppError); ok {
-			http.Error(w, appErr.Message, appErr.Code)
-		} else {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		}
+		appErr := WrapError(err, http.StatusInternalServerError)
+		http.Error(w, appErr.Message, appErr.Code)
 	}
 }
 

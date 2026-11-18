@@ -5,8 +5,13 @@ import (
 	"time"
 
 	glk "github.com/hansir-hsj/GoLiteKit"
+	otelapi "go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// instrumentationName is the instrumentation scope of the tracer and meter.
+// The service name belongs in the provider's Resource (service.name).
+const instrumentationName = "github.com/hansir-hsj/GoLiteKit/otel"
 
 type Observer struct {
 	options Options
@@ -14,17 +19,24 @@ type Observer struct {
 	metrics *metricRecorder
 }
 
+// NewObserver creates an Observer. Without WithTracerProvider /
+// WithMeterProvider it uses the global providers (otel.GetTracerProvider,
+// otel.GetMeterProvider), which are no-ops until the application sets them.
 func NewObserver(opts ...Option) *Observer {
 	options := applyOptions(opts)
-	provider := options.TracerProvider
-	if provider == nil {
-		provider = trace.NewNoopTracerProvider()
+	tracerProvider := options.TracerProvider
+	if tracerProvider == nil {
+		tracerProvider = otelapi.GetTracerProvider()
+	}
+	meterProvider := options.MeterProvider
+	if meterProvider == nil {
+		meterProvider = otelapi.GetMeterProvider()
 	}
 
 	return &Observer{
 		options: options,
-		tracer:  provider.Tracer(options.ServiceName),
-		metrics: newMetricRecorder(options),
+		tracer:  tracerProvider.Tracer(instrumentationName, trace.WithInstrumentationVersion(glk.Version)),
+		metrics: newMetricRecorder(meterProvider, options),
 	}
 }
 

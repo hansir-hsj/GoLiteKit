@@ -9,12 +9,16 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/config"
 )
 
+// Defaults match golitekit.DefaultServerConfig. WriteTimeout also bounds the
+// handler duration in NewAppFromConfig, so it must not be sub-second.
 const (
-	DefaultReadTimeout       = 1000 * time.Millisecond
-	DefaultWriteTimeout      = 1000 * time.Millisecond
-	DefaultReadHeaderTimeout = 200 * time.Millisecond
-	DefaultIdleTimeout       = 2 * time.Second
-	DefaultShutdownTimeout   = 2 * time.Second
+	DefaultReadTimeout       = 30 * time.Second
+	DefaultWriteTimeout      = 30 * time.Second
+	DefaultReadHeaderTimeout = 5 * time.Second
+	DefaultIdleTimeout       = 60 * time.Second
+	DefaultShutdownTimeout   = 10 * time.Second
+	DefaultMaxHeaderBytes    = 1 << 20
+	DefaultSSETimeout        = 300 * time.Second
 )
 
 var (
@@ -30,9 +34,11 @@ type EnvHttpServer struct {
 
 	MaxHeaderBytes int  `toml:"maxHeaderBytes"`
 	EnablePprof    bool `toml:"enablePprof"`
+	// PprofAddr, if set with enablePprof, serves pprof on its own listener
+	// (e.g. "127.0.0.1:6060") instead of the app's port.
+	PprofAddr string `toml:"pprofAddr"`
 
 	EnvTimeout   `toml:"Timeout"`
-	EnvRateLimit `toml:"RateLimit"`
 	EnvLogger    `toml:"Logger"`
 	EnvDB        `toml:"DB"`
 	EnvRedis     `toml:"Redis"`
@@ -41,17 +47,13 @@ type EnvHttpServer struct {
 	EnvStatic    `toml:"Static"`
 }
 
+// EnvTimeout values are in milliseconds.
 type EnvTimeout struct {
 	ReadTimeout       int `toml:"readTimeout"`
 	ReadHeaderTimeout int `toml:"readHeaderTimeout"`
 	WriteTimeout      int `toml:"writeTimeout"`
 	IdleTimeout       int `toml:"idleTimeout"`
 	ShutdownTimeout   int `toml:"shutdownTimeout"`
-}
-
-type EnvRateLimit struct {
-	RateLimit int `toml:"rateLimit"`
-	RateBurst int `toml:"rateBurst"`
 }
 
 type EnvLogger struct {
@@ -78,280 +80,274 @@ type EnvTLSConfig struct {
 	KeyFile  string `toml:"keyFile"`
 }
 
+// EnvSSE.Timeout is in milliseconds.
 type EnvSSE struct {
 	Timeout int `toml:"timeout"`
 }
 
+// Env is one loaded app config; its methods are nil-safe and return defaults.
+// Referenced files (configFile, certFile, keyFile) are relative to ConfDir,
+// staticDir to RootDir; absolute paths are kept.
 type Env struct {
 	rootDir string
 	confDir string
 
-	EnvHttpServer `toml:"HttpServer"`
+	HttpServer EnvHttpServer `toml:"HttpServer"`
 }
 
-func Init(path string) error {
+// Load reads the app config at path into a new Env without changing the
+// process-wide default. Use it to run several apps with different configs in
+// one process.
+func Load(path string) (*Env, error) {
 	curPath, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	e := &Env{
+		rootDir: curPath,
+		confDir: filepath.Dir(absPath),
+	}
+	if err := config.Parse(path, e); err != nil {
+		return nil, err
+	}
+	return e, nil
+}
+
+// Init loads the app config at path and makes it the process-wide default
+// read by the package-level functions (AppName, Addr, ...).
+func Init(path string) error {
+	e, err := Load(path)
 	if err != nil {
 		return err
 	}
-	nextEnv := &Env{
-		rootDir: curPath,
-		confDir: filepath.Join(curPath, "conf"),
-	}
-	if err := config.Parse(path, nextEnv); err != nil {
-		return err
-	}
-
-	envMu.Lock()
-	defaultEnv = nextEnv
-	envMu.Unlock()
+	SetDefault(e)
 	return nil
 }
 
-func currentEnv() *Env {
+// SetDefault makes e the Env read by the package-level functions.
+func SetDefault(e *Env) {
+	envMu.Lock()
+	defaultEnv = e
+	envMu.Unlock()
+}
+
+// Default returns the Env set by Init or SetDefault, or nil.
+func Default() *Env {
 	envMu.RLock()
 	defer envMu.RUnlock()
 	return defaultEnv
 }
 
-func AppName() string {
-	e := currentEnv()
+func millis(v int, def time.Duration) time.Duration {
+	if v == 0 {
+		return def
+	}
+	return time.Duration(v) * time.Millisecond
+}
+
+// resolvePath returns p unchanged if it is empty or absolute, otherwise p
+// joined to base.
+func resolvePath(base, p string) string {
+	if p == "" || filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(base, p)
+}
+
+// ---- accessors on *Env ----------------------------------------------------
+
+func (e *Env) AppName() string {
 	if e == nil {
 		return ""
 	}
-	return e.AppName
+	return e.HttpServer.AppName
 }
 
-func RunMode() string {
-	e := currentEnv()
+func (e *Env) RunMode() string {
 	if e == nil {
 		return ""
 	}
-	return e.RunMode
+	return e.HttpServer.RunMode
 }
 
-func Network() string {
-	e := currentEnv()
+func (e *Env) Network() string {
 	if e == nil {
 		return ""
 	}
-	return e.Network
+	return e.HttpServer.Network
 }
 
-func Addr() string {
-	e := currentEnv()
+func (e *Env) Addr() string {
 	if e == nil {
 		return ""
 	}
-	return e.Addr
+	return e.HttpServer.Addr
 }
 
-func RootDir() string {
-	e := currentEnv()
+func (e *Env) RootDir() string {
 	if e == nil {
 		return ""
 	}
 	return e.rootDir
 }
 
-func ConfDir() string {
-	e := currentEnv()
+func (e *Env) ConfDir() string {
 	if e == nil {
 		return ""
 	}
 	return e.confDir
 }
 
-func StaticDir() string {
-	e := currentEnv()
+func (e *Env) StaticDir() string {
 	if e == nil {
 		return ""
 	}
-	if e.StaticDir == "" {
-		return ""
-	}
-	return filepath.Join(e.rootDir, e.StaticDir)
+	return resolvePath(e.rootDir, e.HttpServer.StaticDir)
 }
 
-func ReadTimeout() time.Duration {
-	e := currentEnv()
+func (e *Env) ReadTimeout() time.Duration {
 	if e == nil {
 		return DefaultReadTimeout
 	}
-	if e.ReadTimeout == 0 {
-		return DefaultReadTimeout
-	}
-	return time.Duration(e.ReadTimeout) * time.Millisecond
+	return millis(e.HttpServer.ReadTimeout, DefaultReadTimeout)
 }
 
-func ReadHeaderTimeout() time.Duration {
-	e := currentEnv()
+func (e *Env) ReadHeaderTimeout() time.Duration {
 	if e == nil {
 		return DefaultReadHeaderTimeout
 	}
-	if e.ReadHeaderTimeout == 0 {
-		return DefaultReadHeaderTimeout
-	}
-	return time.Duration(e.ReadHeaderTimeout) * time.Millisecond
+	return millis(e.HttpServer.ReadHeaderTimeout, DefaultReadHeaderTimeout)
 }
 
-func WriteTimeout() time.Duration {
-	e := currentEnv()
+func (e *Env) WriteTimeout() time.Duration {
 	if e == nil {
 		return DefaultWriteTimeout
 	}
-	if e.WriteTimeout == 0 {
-		return DefaultWriteTimeout
-	}
-	return time.Duration(e.WriteTimeout) * time.Millisecond
+	return millis(e.HttpServer.WriteTimeout, DefaultWriteTimeout)
 }
 
-func IdleTimeout() time.Duration {
-	e := currentEnv()
+func (e *Env) IdleTimeout() time.Duration {
 	if e == nil {
 		return DefaultIdleTimeout
 	}
-	if e.IdleTimeout == 0 {
-		return DefaultIdleTimeout
-	}
-	return time.Duration(e.IdleTimeout) * time.Millisecond
+	return millis(e.HttpServer.IdleTimeout, DefaultIdleTimeout)
 }
 
-func ShutdownTimeout() time.Duration {
-	e := currentEnv()
+func (e *Env) ShutdownTimeout() time.Duration {
 	if e == nil {
 		return DefaultShutdownTimeout
 	}
-	if e.ShutdownTimeout == 0 {
-		return DefaultShutdownTimeout
-	}
-	return time.Duration(e.ShutdownTimeout) * time.Millisecond
+	return millis(e.HttpServer.ShutdownTimeout, DefaultShutdownTimeout)
 }
 
-func MaxHeaderBytes() int {
-	e := currentEnv()
-	if e == nil {
-		return 1 << 20
+func (e *Env) MaxHeaderBytes() int {
+	if e == nil || e.HttpServer.MaxHeaderBytes == 0 {
+		return DefaultMaxHeaderBytes
 	}
-	if e.MaxHeaderBytes == 0 {
-		return 1 << 20
-	}
-	return e.MaxHeaderBytes
+	return e.HttpServer.MaxHeaderBytes
 }
 
-func RateLimit() int {
-	e := currentEnv()
-	if e == nil {
-		return 0
-	}
-	return e.RateLimit
-}
-
-func RateBurst() int {
-	e := currentEnv()
-	if e == nil {
-		return 0
-	}
-	if e.RateBurst == 0 {
-		return e.RateLimit
-	}
-	return e.RateBurst
-}
-
-func DBConfigFile() string {
-	e := currentEnv()
+// confFile resolves name relative to the conf directory; "" stays "" and
+// absolute paths are kept.
+func (e *Env) confFile(name string) string {
 	if e == nil {
 		return ""
 	}
-	if e.DB == "" {
-		return ""
-	}
-	return filepath.Join(e.confDir, e.DB)
+	return resolvePath(e.confDir, name)
 }
 
-func RedisConfigFile() string {
-	e := currentEnv()
+func (e *Env) DBConfigFile() string {
 	if e == nil {
 		return ""
 	}
-	if e.Redis == "" {
-		return ""
-	}
-	return filepath.Join(e.confDir, e.Redis)
+	return e.confFile(e.HttpServer.DB)
 }
 
-func LoggerConfigFile() string {
-	e := currentEnv()
+func (e *Env) RedisConfigFile() string {
 	if e == nil {
 		return ""
 	}
-	if e.Logger == "" {
-		return ""
-	}
-	return filepath.Join(e.confDir, e.Logger)
+	return e.confFile(e.HttpServer.Redis)
 }
 
-func TLS() bool {
-	e := currentEnv()
-	if e == nil {
-		return false
-	}
-	return e.TLS
-}
-
-func TLSCertFile() string {
-	e := currentEnv()
+func (e *Env) LoggerConfigFile() string {
 	if e == nil {
 		return ""
 	}
-	if e.CertFile == "" {
-		return ""
-	}
-	return filepath.Join(e.confDir, e.CertFile)
+	return e.confFile(e.HttpServer.Logger)
 }
 
-func TLSKeyFile() string {
-	e := currentEnv()
+func (e *Env) TLS() bool {
+	return e != nil && e.HttpServer.TLS
+}
+
+func (e *Env) TLSCertFile() string {
 	if e == nil {
 		return ""
 	}
-	if e.KeyFile == "" {
+	return e.confFile(e.HttpServer.CertFile)
+}
+
+func (e *Env) TLSKeyFile() string {
+	if e == nil {
 		return ""
 	}
-	return filepath.Join(e.confDir, e.KeyFile)
+	return e.confFile(e.HttpServer.KeyFile)
 }
 
-func EnablePprof() bool {
-	e := currentEnv()
-	if e == nil {
-		return false
-	}
-	return e.EnablePprof
+func (e *Env) EnablePprof() bool {
+	return e != nil && e.HttpServer.EnablePprof
 }
 
-func SSETimeout() time.Duration {
-	e := currentEnv()
+func (e *Env) PprofAddr() string {
 	if e == nil {
-		return 300 * time.Second
+		return ""
 	}
-	if e.Timeout == 0 {
-		return 300 * time.Second
-	}
-	return time.Duration(e.Timeout) * time.Millisecond
+	return e.HttpServer.PprofAddr
 }
 
-func LogRequestBody() bool {
-	e := currentEnv()
+func (e *Env) SSETimeout() time.Duration {
 	if e == nil {
-		return false
+		return DefaultSSETimeout
 	}
-	return e.LogRequestBody
+	return millis(e.HttpServer.EnvSSE.Timeout, DefaultSSETimeout)
 }
 
-func LogResponseBody() bool {
-	e := currentEnv()
-	if e == nil {
-		return false
-	}
-	return e.LogResponseBody
+func (e *Env) LogRequestBody() bool {
+	return e != nil && e.HttpServer.LogRequestBody
 }
+
+func (e *Env) LogResponseBody() bool {
+	return e != nil && e.HttpServer.LogResponseBody
+}
+
+// ---- package-level accessors (read the default Env) -----------------------
+
+func AppName() string                  { return Default().AppName() }
+func RunMode() string                  { return Default().RunMode() }
+func Network() string                  { return Default().Network() }
+func Addr() string                     { return Default().Addr() }
+func RootDir() string                  { return Default().RootDir() }
+func ConfDir() string                  { return Default().ConfDir() }
+func StaticDir() string                { return Default().StaticDir() }
+func ReadTimeout() time.Duration       { return Default().ReadTimeout() }
+func ReadHeaderTimeout() time.Duration { return Default().ReadHeaderTimeout() }
+func WriteTimeout() time.Duration      { return Default().WriteTimeout() }
+func IdleTimeout() time.Duration       { return Default().IdleTimeout() }
+func ShutdownTimeout() time.Duration   { return Default().ShutdownTimeout() }
+func MaxHeaderBytes() int              { return Default().MaxHeaderBytes() }
+func DBConfigFile() string             { return Default().DBConfigFile() }
+func RedisConfigFile() string          { return Default().RedisConfigFile() }
+func LoggerConfigFile() string         { return Default().LoggerConfigFile() }
+func TLS() bool                        { return Default().TLS() }
+func TLSCertFile() string              { return Default().TLSCertFile() }
+func TLSKeyFile() string               { return Default().TLSKeyFile() }
+func EnablePprof() bool                { return Default().EnablePprof() }
+func PprofAddr() string                { return Default().PprofAddr() }
+func SSETimeout() time.Duration        { return Default().SSETimeout() }
+func LogRequestBody() bool             { return Default().LogRequestBody() }
+func LogResponseBody() bool            { return Default().LogResponseBody() }

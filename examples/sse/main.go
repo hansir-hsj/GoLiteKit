@@ -25,16 +25,19 @@ type CounterController struct {
 }
 
 func (c *CounterController) Serve(ctx context.Context) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	for i := 1; i <= 5; i++ {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
 		if err := c.SendSSEData(map[string]int{"count": i}); err != nil {
 			return err
 		}
-		time.Sleep(time.Second)
+		// Wait for the next tick, but stop as soon as the client disconnects.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
 	}
 	return c.SendSSEEvent("done", "stream finished")
 }
@@ -52,17 +55,19 @@ func (c *ChatController) Serve(ctx context.Context) error {
 		{Event: "leave", Data: "alice left the room"},
 	}
 
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
 	for i, ev := range events {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-		}
 		ev.ID = fmt.Sprintf("%d", i+1)
 		if err := c.SendSSE(ev); err != nil {
 			return err
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
 	}
 	return nil
 }

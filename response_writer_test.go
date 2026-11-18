@@ -32,12 +32,6 @@ func (r *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return server, bufio.NewReadWriter(bufio.NewReader(server), bufio.NewWriter(server)), nil
 }
 
-func (d *deferredResponseWriter) Buffer() []byte {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.buffer.Bytes()
-}
-
 func (d *deferredResponseWriter) StatusCode() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -57,9 +51,15 @@ func (d *deferredResponseWriter) IsHijacked() bool {
 }
 
 func TestDeferredResponseWriter_Write(t *testing.T) {
-	t.Run("buffers write before commit", func(t *testing.T) {
+	t.Run("first write sends pending headers and passes body through", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		dw := newDeferredResponseWriter(rec)
+
+		dw.Header().Set("X-Custom", "value")
+		dw.WriteHeader(http.StatusCreated)
+		if rec.Code != http.StatusOK || rec.Header().Get("X-Custom") != "" {
+			t.Fatal("status and headers should stay pending before the first write")
+		}
 
 		n, err := dw.Write([]byte("hello"))
 		if err != nil {
@@ -68,15 +68,14 @@ func TestDeferredResponseWriter_Write(t *testing.T) {
 		if n != 5 {
 			t.Errorf("bytes written = %d, want 5", n)
 		}
-
-		// Original writer should not have received data yet
-		if rec.Body.Len() > 0 {
-			t.Error("data should be buffered, not written to original")
+		if rec.Code != http.StatusCreated || rec.Header().Get("X-Custom") != "value" {
+			t.Errorf("status = %d, X-Custom = %q; want pending values committed", rec.Code, rec.Header().Get("X-Custom"))
 		}
-
-		// Buffer should contain data
-		if string(dw.Buffer()) != "hello" {
-			t.Errorf("buffer = %s, want hello", string(dw.Buffer()))
+		if rec.Body.String() != "hello" {
+			t.Errorf("body = %q, want hello written through", rec.Body.String())
+		}
+		if !dw.IsCommitted() {
+			t.Error("writer should be committed after the first write")
 		}
 	})
 
@@ -98,33 +97,45 @@ func TestDeferredResponseWriter_Write(t *testing.T) {
 			t.Errorf("body = %s, want direct", rec.Body.String())
 		}
 	})
+}
 
-	t.Run("commits and passes through when buffer limit exceeded", func(t *testing.T) {
-		rec := httptest.NewRecorder()
-		dw := newDeferredResponseWriter(rec)
+// statusLog records every WriteHeader call and the headers sent with it;
+// httptest.ResponseRecorder keeps only the first one, including 1xx codes.
+type statusLog struct {
+	*httptest.ResponseRecorder
+	codes   []int
+	headers []http.Header
+}
 
-		large := make([]byte, DefaultDeferredResponseBufferLimit+1)
-		for i := range large {
-			large[i] = 'a'
-		}
+func (s *statusLog) WriteHeader(code int) {
+	s.codes = append(s.codes, code)
+	s.headers = append(s.headers, s.Header().Clone())
+	if code >= 200 {
+		s.ResponseRecorder.WriteHeader(code)
+	}
+}
 
-		n, err := dw.Write(large)
-		if err != nil {
-			t.Fatalf("Write failed: %v", err)
-		}
-		if n != len(large) {
-			t.Fatalf("bytes written = %d, want %d", n, len(large))
-		}
-		if !dw.IsCommitted() {
-			t.Fatal("writer should commit after buffer limit is exceeded")
-		}
-		if rec.Body.Len() != len(large) {
-			t.Fatalf("body length = %d, want %d", rec.Body.Len(), len(large))
-		}
-		if len(dw.Buffer()) != 0 {
-			t.Fatalf("buffer length = %d, want 0 after pass-through", len(dw.Buffer()))
-		}
-	})
+func TestDeferredResponseWriter_InformationalStatusIsSentImmediately(t *testing.T) {
+	rec := &statusLog{ResponseRecorder: httptest.NewRecorder()}
+	dw := newDeferredResponseWriter(rec)
+
+	dw.Header().Set("Link", "</style.css>; rel=preload")
+	dw.WriteHeader(http.StatusEarlyHints)
+	if dw.IsCommitted() {
+		t.Fatal("1xx must not commit the final response")
+	}
+	dw.WriteHeader(http.StatusCreated)
+	dw.Write([]byte("ok"))
+
+	if len(rec.codes) != 2 || rec.codes[0] != http.StatusEarlyHints || rec.codes[1] != http.StatusCreated {
+		t.Fatalf("status codes = %v, want [103 201]", rec.codes)
+	}
+	if rec.headers[0].Get("Link") == "" {
+		t.Fatal("1xx response sent without the headers set before it")
+	}
+	if rec.Header().Get("Link") == "" {
+		t.Fatal("headers set before the 1xx response were lost")
+	}
 }
 
 func TestDeferredResponseWriter_WriteHeader(t *testing.T) {
@@ -249,19 +260,15 @@ func TestDeferredResponseWriter_Commit(t *testing.T) {
 }
 
 func TestDeferredResponseWriter_Reset(t *testing.T) {
-	t.Run("clears buffered data", func(t *testing.T) {
+	t.Run("clears pending status and headers", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		dw := newDeferredResponseWriter(rec)
 
 		dw.Header().Set("X-Custom", "value")
 		dw.WriteHeader(http.StatusCreated)
-		dw.Write([]byte("data"))
 
 		dw.Reset()
 
-		if len(dw.Buffer()) > 0 {
-			t.Error("buffer should be empty after reset")
-		}
 		if dw.StatusCode() != http.StatusOK {
 			t.Errorf("status should be reset to 200, got %d", dw.StatusCode())
 		}
@@ -270,6 +277,19 @@ func TestDeferredResponseWriter_Reset(t *testing.T) {
 		}
 		if dw.IsCommitted() {
 			t.Error("should not be committed after reset")
+		}
+	})
+
+	t.Run("is a no-op after the first write", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		dw := newDeferredResponseWriter(rec)
+
+		dw.WriteHeader(http.StatusCreated)
+		dw.Write([]byte("data"))
+		dw.Reset()
+
+		if !dw.responseSent() || rec.Code != http.StatusCreated || rec.Body.String() != "data" {
+			t.Errorf("sent response changed after Reset: %d %q", rec.Code, rec.Body.String())
 		}
 	})
 }
@@ -289,9 +309,6 @@ func TestDeferredResponseWriter_Flush_CommitsOnFirstCall(t *testing.T) {
 
 	dw.Flush()
 
-	if !dw.IsFlushed() {
-		t.Error("IsFlushed should be true after Flush()")
-	}
 	if !dw.IsCommitted() {
 		t.Error("IsCommitted should be true after Flush()")
 	}
@@ -332,7 +349,6 @@ func TestDeferredResponseWriter_CommitSkippedAfterHijack(t *testing.T) {
 	rec := &hijackRecorder{ResponseRecorder: httptest.NewRecorder()}
 	dw := newDeferredResponseWriter(rec)
 	dw.WriteHeader(http.StatusCreated)
-	dw.Write([]byte("buffered"))
 
 	conn, _, err := dw.Hijack()
 	if err != nil {
@@ -379,11 +395,11 @@ func TestDeferredResponseWriter_Reset_IgnoredAfterFlush(t *testing.T) {
 	dw.Write([]byte("sent"))
 	dw.Flush()
 
-	// Reset should not clear flushed state.
+	// Reset should not clear the committed state.
 	dw.Reset()
 
-	if !dw.IsFlushed() {
-		t.Error("IsFlushed should remain true after attempted Reset")
+	if !dw.IsCommitted() {
+		t.Error("IsCommitted should remain true after attempted Reset")
 	}
 }
 
@@ -432,15 +448,20 @@ func TestResponseCapture(t *testing.T) {
 		}
 	})
 
-	t.Run("captures response body up to limit", func(t *testing.T) {
+	t.Run("captures beyond log limit up to capture limit", func(t *testing.T) {
 		rec := httptest.NewRecorder()
 		rc := newResponseCapture(rec, true, 4)
 
 		rc.Write([]byte("hello"))
 		rc.Write([]byte(" world"))
 
-		if string(rc.body) != "hell" {
-			t.Errorf("captured body = %q, want hell", string(rc.body))
+		// The capture is larger than the log limit so JSON can be redacted
+		// before truncation; truncation happens when the body is logged.
+		if body, total := rc.capturedBody(); string(body) != "hello world" || total != 11 {
+			t.Errorf("captured body = %q (total %d), want full body", body, total)
+		}
+		if got := sanitizeCapturedBody(rc.body, rc.total, 4, "text/plain"); got != "hell...(truncated)" {
+			t.Errorf("logged body = %q, want truncated", got)
 		}
 		if rec.Body.String() != "hello world" {
 			t.Errorf("original body = %q, want full response", rec.Body.String())

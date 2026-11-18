@@ -2,30 +2,13 @@ package golitekit
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
+	"unicode"
 )
-
-// sensitiveKeys are redacted from logged JSON bodies and query strings.
-var sensitiveKeys = []string{
-	"password",
-	"passwd",
-	"pwd",
-	"token",
-	"access_token",
-	"refresh_token",
-	"secret",
-	"client_secret",
-	"authorization",
-	"auth",
-	"api_key",
-	"apikey",
-	"session",
-	"cookie",
-	"credential",
-	"private_key",
-}
 
 // truncateBody returns body as string, truncated to limit bytes.
 func truncateBody(body []byte, limit int64) string {
@@ -52,6 +35,16 @@ func sanitizeLoggedBody(body []byte, limit int64, contentType string) string {
 		return truncateBody(redacted, limit)
 	}
 	return truncateBody(body, limit)
+}
+
+// sanitizeCapturedBody is sanitizeLoggedBody for a body of which only a prefix
+// was captured. A partial JSON body cannot be parsed for redaction, so it is
+// omitted rather than logged unredacted.
+func sanitizeCapturedBody(captured []byte, total int64, limit int64, contentType string) string {
+	if total > int64(len(captured)) && isLoggableContentType(contentType) && isJSONContentType(contentType) {
+		return fmt.Sprintf("[json body omitted: %d bytes exceeds capture limit]", total)
+	}
+	return sanitizeLoggedBody(captured, limit, contentType)
 }
 
 // redactSensitiveKeys replaces values of sensitive keys in JSON strings.
@@ -93,14 +86,41 @@ func redactJSONValue(value any) {
 	}
 }
 
+// sensitiveKeyParts mark a key as sensitive when they appear anywhere in its
+// normalized form (lowercase, without '_' and '-'), e.g. "userPassword",
+// "access_token", "X-Api-Key".
+var sensitiveKeyParts = []string{
+	"password",
+	"passwd",
+	"token",
+	"secret",
+	"authorization",
+	"apikey",
+	"session",
+	"cookie",
+	"credential",
+	"privatekey",
+}
+
+// sensitiveKeysExact are too short to match as substrings without false
+// positives (e.g. "author"), so they must equal the normalized key.
+var sensitiveKeysExact = []string{"pwd", "auth"}
+
+// isSensitiveKey reports whether values under key are redacted from logged
+// JSON bodies and query strings.
 func isSensitiveKey(key string) bool {
-	lower := strings.ToLower(key)
-	for _, s := range sensitiveKeys {
-		if lower == s {
+	normalized := strings.Map(func(r rune) rune {
+		if r == '_' || r == '-' {
+			return -1
+		}
+		return unicode.ToLower(r)
+	}, key)
+	for _, part := range sensitiveKeyParts {
+		if strings.Contains(normalized, part) {
 			return true
 		}
 	}
-	return false
+	return slices.Contains(sensitiveKeysExact, normalized)
 }
 
 func sanitizeQuery(values url.Values) string {
@@ -122,21 +142,52 @@ func sanitizeURL(u *url.URL) string {
 	if u == nil {
 		return ""
 	}
-	query := sanitizeQuery(u.Query())
-	if query == "" {
-		return u.Path
-	}
-	return u.Path + "?" + query
+	return sanitizeURLWithQuery(u.Path, u.Query())
 }
 
-var sensitiveAssignmentPattern = regexp.MustCompile(`(?i)\b(password|passwd|pwd|token|access_token|refresh_token|secret|client_secret|authorization|auth|api_key|apikey|session|cookie|credential|private_key)\b\s*[:=]\s*("[^"]*"|'[^']*'|[^\s,;]+(?:\s+[^\s,;]+)?)`)
+// sanitizeURLWithQuery is sanitizeURL with an already parsed query.
+func sanitizeURLWithQuery(path string, values url.Values) string {
+	query := sanitizeQuery(values)
+	if query == "" {
+		return path
+	}
+	return path + "?" + query
+}
+
+// sensitiveAssignmentPattern matches key=value / key: value in error text;
+// redactAssignments decides by isSensitiveKey.
+var sensitiveAssignmentPattern = regexp.MustCompile(`(?i)\b([a-z0-9_-]+)\s*[:=]\s*("[^"]*"|'[^']*'|(?:bearer|basic|digest|token)\s+[^\s,;]+|[^\s,;]+)`)
 
 func sanitizeErrorMessage(message string, limit int64) string {
 	if strings.TrimSpace(message) == "" {
 		return ""
 	}
-	redacted := sensitiveAssignmentPattern.ReplaceAllString(message, "$1=[REDACTED]")
-	return truncateBody([]byte(redacted), limit)
+	return truncateBody([]byte(redactAssignments(message)), limit)
+}
+
+// redactAssignments replaces values of sensitive keys. A match on a
+// non-sensitive key only skips the key, so "failed: password=x" is still
+// scanned from "password".
+func redactAssignments(s string) string {
+	var b strings.Builder
+	for {
+		loc := sensitiveAssignmentPattern.FindStringSubmatchIndex(s)
+		if loc == nil {
+			break
+		}
+		key := s[loc[2]:loc[3]]
+		if !isSensitiveKey(key) {
+			b.WriteString(s[:loc[3]])
+			s = s[loc[3]:]
+			continue
+		}
+		b.WriteString(s[:loc[0]])
+		b.WriteString(key)
+		b.WriteString("=[REDACTED]")
+		s = s[loc[1]:]
+	}
+	b.WriteString(s)
+	return b.String()
 }
 
 func isJSONContentType(ct string) bool {

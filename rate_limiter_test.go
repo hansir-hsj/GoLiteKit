@@ -2,6 +2,7 @@ package golitekit
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -73,31 +74,10 @@ func TestNewRateLimiter(t *testing.T) {
 }
 
 func TestRateLimiter_LimiterForKey(t *testing.T) {
-	t.Run("creates new limiter for new key", func(t *testing.T) {
-		rl := NewRateLimiter(10, 5)
-
-		limiter, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected limiter to be available")
-		}
-		if limiter == nil {
-			t.Fatal("expected limiter to be created")
-		}
-	})
-
 	t.Run("returns same limiter for same key", func(t *testing.T) {
 		rl := NewRateLimiter(10, 5)
 
-		limiter1, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected first limiter to be available")
-		}
-		limiter2, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected second limiter to be available")
-		}
-
-		if limiter1 != limiter2 {
+		if rl.limiterForKey("user-1") != rl.limiterForKey("user-1") {
 			t.Error("expected same limiter instance for same key")
 		}
 	})
@@ -105,90 +85,70 @@ func TestRateLimiter_LimiterForKey(t *testing.T) {
 	t.Run("returns different limiters for different keys", func(t *testing.T) {
 		rl := NewRateLimiter(10, 5)
 
-		limiter1, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected first limiter to be available")
-		}
-		limiter2, ok := rl.limiterForKey("user-2")
-		if !ok {
-			t.Fatal("expected second limiter to be available")
-		}
-
-		if limiter1 == limiter2 {
+		if rl.limiterForKey("user-1") == rl.limiterForKey("user-2") {
 			t.Error("expected different limiter instances for different keys")
 		}
 	})
 
 	t.Run("concurrent access is safe", func(t *testing.T) {
-		rl := NewRateLimiter(10, 5)
+		rl := NewRateLimiter(10, 5, WithMaxKeys(50))
 
 		var wg sync.WaitGroup
-		for i := 0; i < 100; i++ {
+		for i := 0; i < 200; i++ {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				key := "user-" + string(rune('0'+i%10))
-				_, _ = rl.limiterForKey(key)
+				rl.limiterForKey(fmt.Sprintf("user-%d", i%100)).Allow()
 			}(i)
 		}
 		wg.Wait()
-	})
-
-	t.Run("rejects new keys when max keys exceeded", func(t *testing.T) {
-		rl := NewRateLimiter(10, 5, WithMaxKeys(1), WithoutTTL())
-
-		if _, ok := rl.limiterForKey("user-1"); !ok {
-			t.Fatal("expected first limiter to be available")
-		}
-		if _, ok := rl.limiterForKey("user-2"); ok {
-			t.Fatal("expected second limiter to be rejected")
+		if n := rl.keyCount(); n > 50 {
+			t.Fatalf("tracked keys = %d, want <= 50", n)
 		}
 	})
 
-	t.Run("returns existing key even when max keys reached", func(t *testing.T) {
-		rl := NewRateLimiter(10, 5, WithMaxKeys(1), WithoutTTL())
-
-		first, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected first limiter to be available")
+	t.Run("sharded limiter stays within max keys", func(t *testing.T) {
+		rl := NewRateLimiter(10, 5, WithMaxKeys(5000), WithoutTTL())
+		if len(rl.shards) < 2 {
+			t.Fatalf("shards = %d, want a sharded limiter", len(rl.shards))
 		}
-		second, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected existing limiter to remain available")
+		for i := 0; i < 20000; i++ {
+			rl.limiterForKey(fmt.Sprintf("k%d", i))
 		}
-		if first != second {
-			t.Fatal("expected same limiter for existing key")
+		if n := rl.keyCount(); n > 5000 {
+			t.Fatalf("tracked keys = %d, want <= 5000", n)
 		}
 	})
 
-	t.Run("expired keys are evicted before max key rejection", func(t *testing.T) {
-		rl := NewRateLimiter(10, 5, WithMaxKeys(1), WithTTL(25*time.Millisecond))
+	t.Run("evicts least recently used key when full", func(t *testing.T) {
+		rl := NewRateLimiter(10, 5, WithMaxKeys(2), WithoutTTL())
 
-		if _, ok := rl.limiterForKey("user-1"); !ok {
-			t.Fatal("expected first limiter to be available")
+		rl.limiterForKey("a")
+		rl.limiterForKey("b")
+		rl.limiterForKey("a") // a is now more recent than b
+		rl.limiterForKey("c") // evicts b
+
+		if !rl.has("a") || rl.has("b") || !rl.has("c") {
+			t.Fatalf("a=%v b=%v c=%v, want b evicted", rl.has("a"), rl.has("b"), rl.has("c"))
 		}
+	})
+
+	t.Run("expired keys are dropped as new keys arrive", func(t *testing.T) {
+		rl := NewRateLimiter(10, 5, WithMaxKeys(10), WithTTL(25*time.Millisecond))
+
+		rl.limiterForKey("old")
 		time.Sleep(50 * time.Millisecond)
-		if _, ok := rl.limiterForKey("user-2"); !ok {
-			t.Fatal("expected new limiter after expired key cleanup")
-		}
+		rl.limiterForKey("new")
 
-		rl.mu.RLock()
-		_, oldExists := rl.limiters["user-1"]
-		_, newExists := rl.limiters["user-2"]
-		rl.mu.RUnlock()
-		if oldExists || !newExists {
-			t.Fatalf("oldExists=%v newExists=%v, want old evicted and new created", oldExists, newExists)
+		if rl.has("old") || !rl.has("new") {
+			t.Fatalf("old=%v new=%v, want old dropped after TTL", rl.has("old"), rl.has("new"))
 		}
 	})
 }
 
 func TestRateLimiter_Allow(t *testing.T) {
 	t.Run("allows requests within limit", func(t *testing.T) {
-		rl := NewRateLimiter(rate.Limit(10), 5)
-		limiter, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected limiter to be available")
-		}
+		limiter := NewRateLimiter(rate.Limit(10), 5).limiterForKey("user-1")
 
 		for i := 0; i < 5; i++ {
 			if !limiter.Allow() {
@@ -198,48 +158,13 @@ func TestRateLimiter_Allow(t *testing.T) {
 	})
 
 	t.Run("blocks requests exceeding limit", func(t *testing.T) {
-		rl := NewRateLimiter(rate.Limit(1), 2)
-		limiter, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected limiter to be available")
-		}
+		limiter := NewRateLimiter(rate.Limit(1), 2).limiterForKey("user-1")
 
 		limiter.Allow()
 		limiter.Allow()
 
 		if limiter.Allow() {
 			t.Error("request exceeding burst should be blocked")
-		}
-	})
-}
-
-func TestRateLimiter_TTL(t *testing.T) {
-	t.Run("removes limiter after TTL via lazy eviction", func(t *testing.T) {
-		rl := NewRateLimiter(10, 5, WithTTL(50*time.Millisecond))
-
-		_, ok := rl.limiterForKey("user-1")
-		if !ok {
-			t.Fatal("expected limiter to be available")
-		}
-
-		rl.mu.RLock()
-		_, exists := rl.limiters["user-1"]
-		rl.mu.RUnlock()
-		if !exists {
-			t.Error("limiter should exist immediately after creation")
-		}
-
-		// Wait for TTL to expire
-		time.Sleep(100 * time.Millisecond)
-
-		// Trigger cleanExpired by calling cleanExpired directly
-		rl.cleanExpired()
-
-		rl.mu.RLock()
-		_, exists = rl.limiters["user-1"]
-		rl.mu.RUnlock()
-		if exists {
-			t.Error("limiter should be removed after TTL expiry and cleanup")
 		}
 	})
 }
@@ -255,8 +180,7 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 			return nil
 		})
 
-		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(inner)
+		wrapped := rl.RateLimiterAsMiddleware(ByIP)(inner)
 
 		req := httptest.NewRequest("GET", "/test", nil)
 		req.RemoteAddr = "192.168.1.1:12345"
@@ -280,8 +204,7 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 			return nil
 		})
 
-		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(inner)
+		wrapped := rl.RateLimiterAsMiddleware(ByIP)(inner)
 
 		for i := 0; i < 5; i++ {
 			req := httptest.NewRequest("GET", "/test", nil)
@@ -305,8 +228,7 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 			return nil
 		})
 
-		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(inner)
+		wrapped := rl.RateLimiterAsMiddleware(ByIP)(inner)
 
 		req1 := httptest.NewRequest("GET", "/test", nil)
 		req1.RemoteAddr = "192.168.1.1:12345"
@@ -322,7 +244,7 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("returns 429 when key capacity exceeded", func(t *testing.T) {
+	t.Run("new clients are served when key capacity is full", func(t *testing.T) {
 		rl := NewRateLimiter(rate.Limit(100), 10, WithMaxKeys(1), WithoutTTL())
 
 		handlerCalled := 0
@@ -332,21 +254,15 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 		})
 
 		wrapped := rl.RateLimiterAsMiddleware(ByIP)(inner)
-
-		req1 := httptest.NewRequest("GET", "/test", nil)
-		req1.RemoteAddr = "192.168.1.1:12345"
-		if err := wrapped(req1.Context(), httptest.NewRecorder(), req1); err != nil {
-			t.Fatalf("first request error: %v", err)
+		for _, addr := range []string{"192.168.1.1:1", "192.168.1.2:1", "192.168.1.3:1"} {
+			req := httptest.NewRequest("GET", "/test", nil)
+			req.RemoteAddr = addr
+			if err := wrapped(req.Context(), httptest.NewRecorder(), req); err != nil {
+				t.Fatalf("%s: error %v, want request served", addr, err)
+			}
 		}
-
-		req2 := httptest.NewRequest("GET", "/test", nil)
-		req2.RemoteAddr = "192.168.1.2:12345"
-		err := wrapped(req2.Context(), httptest.NewRecorder(), req2)
-		if appErr, ok := err.(*AppError); !ok || appErr.Code != http.StatusTooManyRequests {
-			t.Fatalf("error = %#v, want 429 AppError", err)
-		}
-		if handlerCalled != 1 {
-			t.Fatalf("handlerCalled = %d, want 1", handlerCalled)
+		if handlerCalled != 3 || rl.keyCount() != 1 {
+			t.Fatalf("handlerCalled = %d keys = %d, want 3 and 1", handlerCalled, rl.keyCount())
 		}
 	})
 
@@ -361,8 +277,7 @@ func TestRateLimiterAsMiddleware(t *testing.T) {
 			return nil
 		})
 
-		middleware := rl.RateLimiterAsMiddleware(ByIP)
-		wrapped := middleware(inner)
+		wrapped := rl.RateLimiterAsMiddleware(ByIP)(inner)
 
 		for i := 0; i < 5; i++ {
 			req := httptest.NewRequest("GET", "/test", nil)
@@ -389,11 +304,88 @@ func TestByIP(t *testing.T) {
 	}
 }
 
-func TestByPath(t *testing.T) {
-	req := httptest.NewRequest("GET", "/api/users", nil)
+func TestByPathUsesRoutePattern(t *testing.T) {
+	rl := NewRateLimiter(rate.Limit(100), 100)
+	var keys []string
+	r := NewRouter(nil)
+	r.Use(func(next Handler) Handler {
+		return func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
+			keys = append(keys, ByPath(req))
+			return next(ctx, w, req)
+		}
+	}, rl.RateLimiterAsMiddleware(ByPath))
+	r.GET("/users/{id}", func(ctx *Context) error { return nil })
 
-	key := ByPath(req)
-	if key != "/api/users" {
-		t.Errorf("key = %s, want /api/users", key)
+	for _, path := range []string{"/users/1", "/users/2", "/users/random-xyz"} {
+		r.Handler().ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, path, nil))
+	}
+	for _, k := range keys {
+		if k != "GET /users/{id}" {
+			t.Fatalf("keys = %v, want the route pattern for every request", keys)
+		}
+	}
+	if rl.keyCount() != 1 {
+		t.Fatalf("tracked keys = %d, want 1 for one route", rl.keyCount())
+	}
+}
+
+func TestByClientIP(t *testing.T) {
+	key := ByClientIP("127.0.0.1", "10.0.0.0/8")
+
+	cases := []struct {
+		name   string
+		remote string
+		xff    []string
+		realIP string
+		want   string
+	}{
+		{"untrusted peer ignores headers", "203.0.113.9:1", []string{"1.2.3.4"}, "5.6.7.8", "203.0.113.9"},
+		{"trusted proxy uses XFF", "127.0.0.1:1", []string{"198.51.100.7"}, "", "198.51.100.7"},
+		{"rightmost untrusted hop wins", "127.0.0.1:1", []string{"6.6.6.6, 198.51.100.7, 10.1.2.3"}, "", "198.51.100.7"},
+		{"multiple XFF headers", "127.0.0.1:1", []string{"6.6.6.6", "198.51.100.7"}, "", "198.51.100.7"},
+		{"X-Real-IP without XFF", "10.0.0.5:1", nil, "198.51.100.8", "198.51.100.8"},
+		{"malformed XFF falls back", "127.0.0.1:1", []string{"not-an-ip"}, "", "127.0.0.1"},
+		{"no headers uses peer", "127.0.0.1:1", nil, "", "127.0.0.1"},
+		{"all hops trusted", "127.0.0.1:1", []string{"10.0.0.1, 10.0.0.2"}, "", "10.0.0.1"},
+		{"XFF hop with port", "127.0.0.1:1", []string{"198.51.100.7:5678"}, "", "198.51.100.7"},
+		{"XFF IPv6 hop with port", "127.0.0.1:1", []string{"[2001:db8::1]:443"}, "", "2001:db8::1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remote
+			for _, v := range tc.xff {
+				req.Header.Add("X-Forwarded-For", v)
+			}
+			if tc.realIP != "" {
+				req.Header.Set("X-Real-IP", tc.realIP)
+			}
+			if got := key(req); got != tc.want {
+				t.Fatalf("key = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestByClientIPPanicsOnInvalidProxy(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic for invalid trusted proxy")
+		}
+	}()
+	ByClientIP("not-a-cidr/99")
+}
+
+// Trusted proxies given as IPv4-mapped prefixes or zoned link-local addresses
+// still match.
+func TestByClientIPNormalizesTrustedProxies(t *testing.T) {
+	key := ByClientIP("::ffff:10.0.0.0/104", "fe80::1")
+	for _, remote := range []string{"10.1.2.3:1", "[fe80::1%eth0]:1"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.RemoteAddr = remote
+		req.Header.Set("X-Forwarded-For", "198.51.100.7")
+		if got := key(req); got != "198.51.100.7" {
+			t.Errorf("remote %s: key = %q, want the forwarded client", remote, got)
+		}
 	}
 }

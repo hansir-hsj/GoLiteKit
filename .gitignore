@@ -2,6 +2,5 @@
 logger/logs/*.log
 logger/logs/*.log.*
 
-# Local Claude/project planning files
-CLAUDE.md
+# Local planning files
 docs/

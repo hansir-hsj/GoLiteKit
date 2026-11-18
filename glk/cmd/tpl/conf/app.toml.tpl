@@ -7,24 +7,27 @@ enablePprof = false
 
 # timeout values in milliseconds
 [HttpServer.Timeout]
-writeTimeout    = 15000
-readTimeout     = 200
-idleTimeout     = 5000
-shutdownTimeout = 5000
+writeTimeout      = 15000
+readTimeout       = 15000
+readHeaderTimeout = 5000
+idleTimeout       = 60000
+shutdownTimeout   = 5000
 
-# rate limiting
-[HttpServer.RateLimit]
-rateLimit = 100
-rateBurst = 150
+# SSE requests (Accept: text/event-stream) use this handler and write timeout
+# instead of writeTimeout, in milliseconds
+[HttpServer.SSE]
+timeout = 300000
 
-# logger config file path (relative to working directory)
+# Paths below are relative to this file's directory; absolute paths are used as is.
+
+# logger config file path
 [HttpServer.Logger]
 configFile = "logger.toml"
 
-# database config file path
+# database config file path, used by db.NewFromConfig()
 [HttpServer.DB]
 configFile = "db.toml"
 
-# redis config file path
+# redis config file path, used by redis.NewFromConfig()
 [HttpServer.Redis]
 configFile = "redis.toml"

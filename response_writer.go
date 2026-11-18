@@ -2,23 +2,25 @@ package golitekit
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"net"
 	"net/http"
 	"sync"
 )
 
+// DefaultDeferredResponseBufferLimit is kept for compatibility.
+//
+// Deprecated: response bodies are no longer buffered, so there is no limit.
 const DefaultDeferredResponseBufferLimit = 1 << 20
 
+// deferredResponseWriter holds the status and headers until the first Write
+// or Flush, so Reset can still replace the response with an error. The body
+// is not buffered. Pending headers start as a copy of the real ones.
 type deferredResponseWriter struct {
 	http.ResponseWriter
-	buffer          bytes.Buffer
 	header          http.Header
 	statusCode      int
-	bufferLimit     int
-	isCommitted     bool
-	isFlushed       bool // true once data has been committed to the real writer via Flush
+	isCommitted     bool // headers sent to the real writer
 	isHeaderWritten bool
 	isHijacked      bool
 	mu              sync.Mutex
@@ -27,9 +29,23 @@ type deferredResponseWriter struct {
 func newDeferredResponseWriter(w http.ResponseWriter) *deferredResponseWriter {
 	return &deferredResponseWriter{
 		ResponseWriter: w,
-		header:         make(http.Header),
+		header:         cloneHeader(w.Header()),
 		statusCode:     http.StatusOK,
-		bufferLimit:    DefaultDeferredResponseBufferLimit,
+	}
+}
+
+func cloneHeader(h http.Header) http.Header {
+	if c := h.Clone(); c != nil {
+		return c
+	}
+	return make(http.Header)
+}
+
+// replaceHeader makes dst hold exactly the entries of src.
+func replaceHeader(dst, src http.Header) {
+	clear(dst)
+	for k, v := range src {
+		dst[k] = v
 	}
 }
 
@@ -37,134 +53,104 @@ func (d *deferredResponseWriter) Header() http.Header {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.isCommitted {
+	if d.isCommitted || d.isHijacked {
 		return d.ResponseWriter.Header()
 	}
-	if d.isHijacked {
-		return d.ResponseWriter.Header()
-	}
-
 	return d.header
 }
 
 func (d *deferredResponseWriter) Write(b []byte) (int, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	if d.isCommitted {
-		return d.ResponseWriter.Write(b)
-	}
 	if d.isHijacked {
+		d.mu.Unlock()
 		return 0, http.ErrHijacked
 	}
+	d.commitLocked()
+	d.mu.Unlock()
 
-	if d.bufferLimit > 0 && d.buffer.Len()+len(b) > d.bufferLimit {
-		if err := d.commitLocked(); err != nil {
-			return 0, err
-		}
-		return d.ResponseWriter.Write(b)
-	}
-
-	return d.buffer.Write(b)
+	return d.ResponseWriter.Write(b)
 }
 
 func (d *deferredResponseWriter) WriteHeader(code int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.isHeaderWritten {
+	if d.isHijacked || d.isCommitted {
 		return
 	}
-	if d.isHijacked {
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		// Informational responses (e.g. 103 Early Hints) are sent right away
+		// with the headers set so far. The real headers are restored
+		// afterwards, so the pending ones stay discardable by Reset.
+		saved := d.ResponseWriter.Header().Clone()
+		replaceHeader(d.ResponseWriter.Header(), d.header)
+		d.ResponseWriter.WriteHeader(code)
+		replaceHeader(d.ResponseWriter.Header(), saved)
+		return
+	}
+	if d.isHeaderWritten {
 		return
 	}
 	d.isHeaderWritten = true
 	d.statusCode = code
 }
 
-// Commit writes cached response to the actual ResponseWriter.
+// Commit sends the pending status and headers if nothing has been sent yet.
 func (d *deferredResponseWriter) Commit() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	if !d.isHijacked {
+		d.commitLocked()
+	}
+	return nil
+}
+
+func (d *deferredResponseWriter) commitLocked() {
 	if d.isCommitted {
-		return nil
+		return
 	}
-	if d.isHijacked {
-		return nil
-	}
-	return d.commitLocked()
-}
-
-func (d *deferredResponseWriter) commitLocked() error {
 	d.isCommitted = true
-
-	for k, v := range d.header {
-		for _, vv := range v {
-			d.ResponseWriter.Header().Add(k, vv)
-		}
-	}
-
+	replaceHeader(d.ResponseWriter.Header(), d.header)
 	d.ResponseWriter.WriteHeader(d.statusCode)
-
-	_, err := d.ResponseWriter.Write(d.buffer.Bytes())
-	d.buffer.Reset()
-	return err
 }
 
+// Reset discards the pending status and headers set by the handler, going
+// back to the headers of the real writer. It is a no-op once the response has
+// been committed or the connection hijacked.
 func (d *deferredResponseWriter) Reset() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.isFlushed {
-		// Data already sent to the real writer; cannot undo.
+	if d.isCommitted || d.isHijacked {
 		return
 	}
-
-	d.buffer.Reset()
-	// Clear the header map in-place rather than allocating a new one.
-	for k := range d.header {
-		delete(d.header, k)
-	}
+	d.header = cloneHeader(d.ResponseWriter.Header())
 	d.statusCode = http.StatusOK
-	d.bufferLimit = DefaultDeferredResponseBufferLimit
-	d.isCommitted = false
 	d.isHeaderWritten = false
-	d.isHijacked = false
 }
 
 func (d *deferredResponseWriter) Flush() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	if d.isHijacked {
+		d.mu.Unlock()
 		return
 	}
-	if !d.isFlushed {
-		// First flush: commit buffered headers/body and switch to streaming pass-through.
-		d.isFlushed = true
-		d.isCommitted = true
-		for k, v := range d.header {
-			for _, vv := range v {
-				d.ResponseWriter.Header().Add(k, vv)
-			}
-		}
-		d.ResponseWriter.WriteHeader(d.statusCode)
-		if d.buffer.Len() > 0 {
-			_, _ = d.ResponseWriter.Write(d.buffer.Bytes())
-			d.buffer.Reset()
-		}
-	}
+	d.commitLocked()
+	d.mu.Unlock()
 
 	if f, ok := d.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
 }
 
-func (d *deferredResponseWriter) IsFlushed() bool {
+// responseSent reports whether the status line has reached the real writer
+// (first Write, Flush, or Commit) or the connection was hijacked, after which
+// the response can no longer be replaced.
+func (d *deferredResponseWriter) responseSent() bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.isFlushed
+	return d.isCommitted || d.isHijacked
 }
 
 func (d *deferredResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -175,7 +161,6 @@ func (d *deferredResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		}
 		d.mu.Lock()
 		d.isHijacked = true
-		d.buffer.Reset()
 		d.mu.Unlock()
 		return conn, rw, nil
 	}
@@ -187,12 +172,19 @@ func (d *deferredResponseWriter) Unwrap() http.ResponseWriter {
 	return d.ResponseWriter
 }
 
+// logCaptureLimit is the minimum number of response bytes captured for
+// logging. JSON bodies must be captured whole to be redacted, so capture more
+// than the logged size and truncate after redaction.
+const logCaptureLimit = 64 << 10
+
 type responseCapture struct {
 	http.ResponseWriter
 	body         []byte
+	total        int64 // bytes written, including ones not captured
 	statusCode   int
+	wroteHeader  bool
 	captureBody  bool
-	maxBodyBytes int64
+	captureLimit int64
 	mu           sync.Mutex
 }
 
@@ -201,33 +193,60 @@ func newResponseCapture(w http.ResponseWriter, captureBody bool, maxBodyBytes in
 		ResponseWriter: w,
 		statusCode:     http.StatusOK,
 		captureBody:    captureBody,
-		maxBodyBytes:   maxBodyBytes,
+		captureLimit:   max(maxBodyBytes, logCaptureLimit),
 	}
 }
 
 func (r *responseCapture) Write(b []byte) (int, error) {
-	if r.captureBody && r.maxBodyBytes > 0 {
-		r.mu.Lock()
-		remaining := int(r.maxBodyBytes) - len(r.body)
-		if remaining > 0 {
-			if len(b) < remaining {
-				remaining = len(b)
-			}
-			r.body = append(r.body, b[:remaining]...)
+	r.mu.Lock()
+	r.wroteHeader = true
+	if r.captureBody {
+		r.total += int64(len(b))
+		if remaining := r.captureLimit - int64(len(r.body)); remaining > 0 {
+			r.body = append(r.body, b[:min(int64(len(b)), remaining)]...)
 		}
-		r.mu.Unlock()
 	}
+	r.mu.Unlock()
 	return r.ResponseWriter.Write(b)
 }
 
 func (r *responseCapture) WriteHeader(code int) {
 	r.mu.Lock()
-	r.statusCode = code
+	// 1xx responses (except 101) are forwarded without fixing the status;
+	// the final status follows.
+	if !r.wroteHeader && (code >= 200 || code == http.StatusSwitchingProtocols) {
+		r.statusCode = code
+		r.wroteHeader = true
+	}
 	r.mu.Unlock()
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// status returns the status code sent so far (200 if nothing was written).
+func (r *responseCapture) status() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.statusCode
+}
+
+func (r *responseCapture) headerWritten() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.wroteHeader
+}
+
+// capturedBody returns the captured prefix of the body and the total size written.
+func (r *responseCapture) capturedBody() ([]byte, int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body, r.total
+}
+
 func (r *responseCapture) Flush() {
+	// Flushing sends the status line (200 if none was set).
+	r.mu.Lock()
+	r.wroteHeader = true
+	r.mu.Unlock()
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}

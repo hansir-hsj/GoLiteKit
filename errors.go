@@ -1,15 +1,35 @@
 package golitekit
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 )
 
-// AppError is an HTTP error with a status code, message, and optional internal cause.
+// AppError is an HTTP error. Code is the HTTP status; Status is an optional
+// business code for the response "status" field (0 means use Code).
 type AppError struct {
 	Code     int    `json:"code"`
+	Status   int    `json:"status,omitempty"`
 	Message  string `json:"message"`
 	Internal error  `json:"-"`
+}
+
+// WithStatus returns a copy of e with the business code set, e.g.
+// ErrBadRequest("invalid phone", nil).WithStatus(10012).
+func (e *AppError) WithStatus(status int) *AppError {
+	cp := *e
+	cp.Status = status
+	return &cp
+}
+
+// ResponseStatus returns the value for the "status" field of the JSON
+// response: the business code if set, otherwise the HTTP status code.
+func (e *AppError) ResponseStatus() int {
+	if e.Status != 0 {
+		return e.Status
+	}
+	return e.Code
 }
 
 // Error implements the error interface.
@@ -80,15 +100,18 @@ func NewAppError(code int, msg string, internal error) *AppError {
 	return &AppError{Code: code, Message: msg, Internal: internal}
 }
 
-// WrapError returns err as *AppError with the given status code.
-// If err is already *AppError it is returned unchanged.
-// For 5xx status codes, the error message is not exposed to the client.
+// WrapError returns err as *AppError with the given code. A wrapped *AppError
+// keeps its codes and message. 5xx messages are not shown to clients.
 func WrapError(err error, code int) *AppError {
 	if err == nil {
 		return nil
 	}
-	if appErr, ok := err.(*AppError); ok {
-		return appErr
+	var appErr *AppError
+	if errors.As(err, &appErr) {
+		if appErr == err {
+			return appErr
+		}
+		return &AppError{Code: appErr.Code, Status: appErr.Status, Message: appErr.Message, Internal: err}
 	}
 	msg := err.Error()
 	if code >= 500 {
