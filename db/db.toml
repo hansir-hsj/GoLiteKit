@@ -1,6 +1,9 @@
+# Backend: "mysql" (default) or "sqlite" (import GoLiteKit/db/sqlite). Non-mysql
+# drivers require dsn, e.g. "file:data/app.db?_pragma=journal_mode(WAL)".
+[db]
+driver = "mysql"
 # Data Source Name. When set, it is used as-is and the connection fields
 # below (username ... parseTime, and [db.Timeout]) are ignored.
-[db]
 dsn = ""
 username = "xx"
 password = "xx"

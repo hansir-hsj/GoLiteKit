@@ -11,7 +11,6 @@ import (
 	"github.com/hansir-hsj/GoLiteKit/env"
 
 	"github.com/go-sql-driver/mysql"
-	mysqlDriver "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
@@ -30,6 +29,9 @@ type DbConn struct {
 }
 
 type DbConfig struct {
+	// Driver selects the backend, "mysql" by default. Other drivers must be
+	// registered, e.g. by importing GoLiteKit/db/sqlite.
+	Driver    string `toml:"driver"`
 	DSN       string `toml:"dsn"`
 	Username  string `toml:"username"`
 	Password  string `toml:"password"`
@@ -53,6 +55,13 @@ func parse(conf string) (*Config, error) {
 	var dbConfig Config
 	if err := config.Parse(conf, &dbConfig); err != nil {
 		return nil, err
+	}
+
+	if dbConfig.Driver == "" {
+		dbConfig.Driver = DriverMySQL
+	}
+	if dbConfig.Driver != DriverMySQL && dbConfig.DSN == "" {
+		return nil, fmt.Errorf("dsn is required for driver %q", dbConfig.Driver)
 	}
 
 	if dbConfig.DSN == "" {
@@ -108,10 +117,15 @@ func NewFromConfig(conf ...string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to parse db config: %w", err)
 	}
 
+	drv, err := lookupDriver(cfg.Driver)
+	if err != nil {
+		return nil, err
+	}
+
 	// Connect and ping with a timeout before handing the pool to gorm: gorm's
 	// own startup queries (automatic ping, SELECT VERSION()) use no context
 	// and would hang on an unresponsive server.
-	sqlDB, err := sql.Open("mysql", cfg.DSN)
+	sqlDB, err := sql.Open(drv.Name, cfg.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
 	}
@@ -133,7 +147,7 @@ func NewFromConfig(conf ...string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	db, err := gorm.Open(mysqlDriver.New(mysqlDriver.Config{Conn: sqlDB}), &gorm.Config{DisableAutomaticPing: true})
+	db, err := gorm.Open(drv.Dialector(sqlDB), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {
 		sqlDB.Close()
 		return nil, fmt.Errorf("failed to open database connection: %w", err)

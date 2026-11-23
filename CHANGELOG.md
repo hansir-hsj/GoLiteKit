@@ -9,6 +9,7 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `db` supports pluggable drivers through `[db] driver` (default `mysql`) and `db.RegisterDriver`; import `db/sqlite` for a pure-Go SQLite backend.
 - Optional OpenTelemetry observability adapter in `otel/`, including HTTP request spans, service spans, HTTP metrics, and service span metrics.
 - Core `Observer`, `Span`, and `StartSpan` abstractions without importing OpenTelemetry from the root package.
 

@@ -42,6 +42,26 @@ func TestDefaultDialTimeout(t *testing.T) {
 	}
 }
 
+func TestNonMySQLDriverRequiresDSN(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "db.toml")
+	if err := os.WriteFile(path, []byte("[db]\ndriver = \"sqlite\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parse(path); err == nil || !strings.Contains(err.Error(), "dsn is required") {
+		t.Fatalf("parse err = %v, want dsn required", err)
+	}
+}
+
+func TestUnknownDriver(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "db.toml")
+	if err := os.WriteFile(path, []byte("[db]\ndriver = \"nope\"\ndsn = \"x\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFromConfig(path); err == nil || !strings.Contains(err.Error(), "unknown database driver") {
+		t.Fatalf("NewFromConfig err = %v, want unknown driver", err)
+	}
+}
+
 // A server that accepts but never sends the MySQL greeting used to hang the
 // startup ping forever (no read timeout, no context).
 func TestNewFromConfigPingTimesOut(t *testing.T) {
