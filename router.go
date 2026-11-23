@@ -269,6 +269,17 @@ func (r *Router) wrapController(newController ControllerFactory, groupMiddleware
 			return ErrInternal("Internal Server Error", errors.New("golitekit: controller factory returned nil"))
 		}
 
+		if b, ok := handler.(sizeLimitBinder); ok {
+			b.bindSizeLimits(handler)
+		}
+		// ParseMultipartForm runs on this request copy, which net/http does
+		// not clean up, so remove spilled temp files here.
+		defer func() {
+			if req.MultipartForm != nil {
+				_ = req.MultipartForm.RemoveAll()
+			}
+		}()
+
 		// Call optional lifecycle hooks if implemented
 		if init, ok := handler.(Initializer); ok {
 			if err := init.Init(ctx); err != nil {

@@ -67,7 +67,20 @@ type BaseControllerOf[T any] struct {
 	request *http.Request
 	logger  logger.Logger
 	gcx     *Context
+	// limits is the outer controller, set by the router so that overridden
+	// MaxMemorySize/MaxBodySize take effect (embedding has no virtual dispatch).
+	limits  RequestSizeLimiter
 	Request T
+}
+
+// sizeLimitBinder is implemented by BaseControllerOf and promoted to the
+// controllers embedding it.
+type sizeLimitBinder interface {
+	bindSizeLimits(RequestSizeLimiter)
+}
+
+func (c *BaseControllerOf[T]) bindSizeLimits(l RequestSizeLimiter) {
+	c.limits = l
 }
 
 // BaseController is the no-body controller base (alias for BaseControllerOf[NoBody]).
@@ -233,11 +246,15 @@ func (c *BaseControllerOf[T]) resetRequest() {
 }
 
 func (c *BaseControllerOf[T]) parseBody() error {
-	maxMemorySize := c.MaxMemorySize()
+	var limits RequestSizeLimiter = c
+	if c.limits != nil {
+		limits = c.limits
+	}
+	maxMemorySize := limits.MaxMemorySize()
 	if maxMemorySize <= 0 {
 		maxMemorySize = DefaultMaxMemorySize
 	}
-	maxBodySize := c.MaxBodySize()
+	maxBodySize := limits.MaxBodySize()
 	if maxBodySize <= 0 {
 		maxBodySize = DefaultMaxBodySize
 	}

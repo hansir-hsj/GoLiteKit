@@ -49,8 +49,17 @@ func pprofHandlers(opt PprofOptions) map[string]http.Handler {
 	}
 
 	prefix := opt.prefix()
+	// pprof.Index only knows the "/debug/pprof/" prefix, so named profiles
+	// (heap, goroutine, ...) are dispatched here.
+	index := func(w http.ResponseWriter, req *http.Request) {
+		if name := strings.TrimPrefix(req.URL.Path, prefix+"/"); name != "" && name != req.URL.Path {
+			pprof.Handler(name).ServeHTTP(w, req)
+			return
+		}
+		pprof.Index(w, req)
+	}
 	return map[string]http.Handler{
-		prefix + "/":        wrap(pprof.Index),
+		prefix + "/":        wrap(index),
 		prefix + "/cmdline": wrap(pprof.Cmdline),
 		prefix + "/profile": wrap(pprof.Profile),
 		prefix + "/symbol":  wrap(pprof.Symbol),
@@ -58,7 +67,9 @@ func pprofHandlers(opt PprofOptions) map[string]http.Handler {
 	}
 }
 
-// MountPprof registers pprof handlers on the router's mux.
+// MountPprof registers pprof handlers on the router's mux. The router's
+// timeout middleware also applies, which can cut off long /profile and /trace
+// requests; use ServePprof or pprofAddr for those.
 func (r *Router) MountPprof(opts ...PprofOptions) {
 	var opt PprofOptions
 	if len(opts) > 0 {

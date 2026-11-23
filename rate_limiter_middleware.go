@@ -13,15 +13,18 @@ import (
 func (r *RateLimiter) RateLimiterAsMiddleware(keyFunc func(r *http.Request) string) Middleware {
 	return func(next Handler) Handler {
 		return func(ctx context.Context, w http.ResponseWriter, req *http.Request) error {
-			if r.enableGlobal && r.globalLimiter != nil {
-				if !r.globalLimiter.Allow() {
-					return ErrTooManyRequests("Global rate limit exceeded", nil)
-				}
-			}
-
+			// The per-key limit is checked first: a client rejected by it must
+			// not consume global tokens (Reservation.Cancel does not refund
+			// an immediate reservation).
 			if keyFunc != nil {
 				if !r.limiterForKey(keyFunc(req)).Allow() {
 					return ErrTooManyRequests("Rate limit exceeded", nil)
+				}
+			}
+
+			if r.enableGlobal && r.globalLimiter != nil {
+				if !r.globalLimiter.Allow() {
+					return ErrTooManyRequests("Global rate limit exceeded", nil)
 				}
 			}
 

@@ -114,7 +114,9 @@ func NewAppFromConfig(confPath string, opts ...ServiceOption) (*App, error) {
 		MaxBodyBytes:    DefaultLogBodyLimit,
 	}
 	timeoutOptions := TimeoutOptions{
-		Duration:   e.WriteTimeout(),
+		// Shorter than the server write timeout, which starts earlier, so the
+		// 503 can still be written.
+		Duration:   e.WriteTimeout() * 9 / 10,
 		SSETimeout: e.SSETimeout(),
 	}
 

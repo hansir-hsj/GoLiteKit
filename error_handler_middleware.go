@@ -3,7 +3,10 @@ package golitekit
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"runtime/debug"
 )
 
 type errorHandlerConfig struct {
@@ -89,6 +92,9 @@ func handlePanic(w http.ResponseWriter, r *http.Request, recovered any, cfg *err
 		gcx.setHandledError(ErrInternal("Internal Server Error", panicError{value: recovered}))
 		if gcx.PanicLogger() != nil {
 			gcx.PanicLogger().Report(ctx, recovered)
+		} else {
+			// No panic logger configured: still record the stack.
+			fmt.Fprintf(os.Stderr, "golitekit: panic: %v\n%s\n", recovered, debug.Stack())
 		}
 	}
 
